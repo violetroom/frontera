@@ -108,6 +108,7 @@ class Attempt:
     detail: str = ""
     pr: int | None = None
     branch: str | None = None
+    execution_id: str | None = None
 
 
 def attempt(ctx: Ctx, t: Ticket, ep: Endpoint) -> Attempt:
@@ -166,7 +167,7 @@ def attempt(ctx: Ctx, t: Ticket, ep: Endpoint) -> Attempt:
     ctx.forge.push(branch)
     pr = ctx.forge.open_pr(f"[{t.key}] {t.summary}", _pr_body(ctx, t, ep, exec_id, result, v), branch,
                            ctx.project.base_branch)
-    return Attempt("pr", (result or {}).get("summary", ""), pr, branch)
+    return Attempt("pr", (result or {}).get("summary", ""), pr, branch, exec_id)
 
 
 def _handoff_note(exec_id: str, ep: Endpoint, res: LaunchResult, result: dict | None, v: Verification) -> str:
@@ -239,7 +240,7 @@ def run_ticket(ctx: Ctx, t: Ticket, owner_command: str | None = None, endpoint: 
         if a.kind == "pr":
             t.pr_number = a.pr
             ctx.tracker.set_status(t, Status.IN_REVIEW)
-            ctx.tracker.save_meta(t, _meta(t, pr_number=a.pr, branch=a.branch), f"Draft PR #{a.pr} is ready for review{_run_link(ctx)}.")
+            ctx.tracker.save_meta(t, _meta(t, pr_number=a.pr, branch=a.branch, execution_id=a.execution_id), f"Draft PR #{a.pr} is ready for review{_run_link(ctx)}.")
             ctx.tracker.comment(t, f"Draft PR #{a.pr} from `{rt.endpoint.name}`. "
                                    f"Reply `/frontera review` for an agent review, or review it yourself.")
             return "pr"

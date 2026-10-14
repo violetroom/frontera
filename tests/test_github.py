@@ -150,7 +150,7 @@ def test_t1_success_opens_draft_pr(world):
     assert world.forge.pushed == [pr["head"]]
     assert "state:in-review" in world.gh.labels(1)
     meta = world.ctx.tracker.meta(1)
-    assert meta.pr_number == 101 and meta.branch == pr["head"]
+    assert meta.pr_number == 101 and meta.branch == pr["head"] and pr["head"] == f"agent/{meta.execution_id}"
 
 
 def test_failures_promote_to_awaiting_command(world):
