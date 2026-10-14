@@ -4,7 +4,7 @@ Accepted means the owner chose it. It does not mean it is built or tested. To ch
 
 | ID | Date | Decision | Status |
 |---|---|---|---|
-| D1 | 2026-10-14 | Tracker: Jira Cloud (plan §8, T1) | Accepted |
+| D1 | 2026-10-14 | Tracker: Jira Cloud (plan §8, T1) | Superseded by D9 |
 | D2 | 2026-10-14 | Manager: Hermes Agent on OpenAI (ChatGPT/Codex OAuth) (plan §2.3, M1) | Accepted |
 | D3 | 2026-10-14 | Interaction model: the owner tells Hermes what to do; Hermes launches the worker agents | Accepted |
 
@@ -80,3 +80,25 @@ Existing orchestrators were considered. [Sortie](https://pkg.go.dev/github.com/s
 Model-call routers (LiteLLM, OpenRouter) remain a candidate for API-key endpoints once a second one is added. They cannot route the Pro or Plus subscriptions.
 
 Owner, 2026-10-14: "lets just do our own at that point. we can borrow ideas from sortie though. I don't know go and i dont feel like figuring it out."
+
+| ID | Date | Decision | Status |
+|---|---|---|---|
+| D9 | 2026-10-14 | Use GitHub (Issues, Projects, Actions) instead of Jira; repos now in the `violetroom` org | Accepted; GitHub design pending |
+
+## D9: GitHub instead of Jira
+
+Supersedes [D1](#d1-jira-as-tracker). The owner found Jira Cloud setup slow and painful, and moved Shiroe and Frontera to a new GitHub organization. Both repos are public, which makes rulesets, environments, secret scanning and unlimited hosted Actions minutes free, but also makes every issue world-readable. The routing model (D4–D7) is unaffected. The tracker adapter, ticket states and owner-command mechanism need a GitHub design.
+
+Owner, 2026-10-14: "we are going to need to seitch to using github services over jira. Jira/Atlassian is being geniunely a huge pain and is really slow."
+
+| ID | Date | Decision | Status |
+|---|---|---|---|
+| D10 | 2026-10-14 | Run agents on GitHub-hosted Actions runners, triggered by owner-applied labels and owner comments | Accepted; design pending |
+
+## D10: Agents run in Actions
+
+Workflows on GitHub-hosted runners run `frontera` and the worker harness in a disposable VM per job. Because the repos are public, minutes are unlimited, and the VM addresses the plan's missing-sandbox gap (§7). It does not give default-deny networking. Hermes acts through issues, comments and `gh workflow run` under a separate GitHub App identity. Workflows must verify that the triggering actor is the owner. No self-hosted runners on public repos. Rejected alternative: a dispatcher on the owner's laptop, which needs the machine on and runs agents on it.
+
+Still to check: `claude-code-action` with a Pro `CLAUDE_CODE_OAUTH_TOKEN`; reaching the Tellico gateway from hosted runners.
+
+Owner, 2026-10-14: "we can do actions."
