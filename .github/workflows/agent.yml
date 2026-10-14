@@ -13,8 +13,13 @@ on:
         type: string
         default: .github/frontera.yaml
       opencode_version:
+        description: OpenCode v2 build (opencode.ai/files/bin, the anomalyco/tap opencode-v2 channel)
         type: string
         default: "2.0.26"
+      opencode_sha256:
+        description: SHA-256 of opencode-linux-x64-baseline.tar.gz for that version
+        type: string
+        default: "0e682946fea509299f1515dfb6261aa5cf8d1d2e5ccdc833470523acb7222106"
       claude_version:
         type: string
         default: "2.1.299"
@@ -54,12 +59,18 @@ jobs:
       - name: Install agent CLIs
         env:
           OPENCODE_VERSION: ${{ inputs.opencode_version }}
+          OPENCODE_SHA256: ${{ inputs.opencode_sha256 }}
           CLAUDE_VERSION: ${{ inputs.claude_version }}
         run: |
-          curl -fsSL https://opencode.ai/install | VERSION="$OPENCODE_VERSION" bash
+          mkdir -p "$HOME/.opencode/bin"
+          curl -fsSL -o /tmp/opencode.tgz "https://opencode.ai/files/bin/${OPENCODE_VERSION}/opencode-linux-x64-baseline.tar.gz"
+          echo "${OPENCODE_SHA256}  /tmp/opencode.tgz" | sha256sum -c -
+          tar -xzf /tmp/opencode.tgz -C "$HOME/.opencode/bin" opencode
           echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
           curl -fsSL https://claude.ai/install.sh | bash -s "$CLAUDE_VERSION"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.opencode/bin/opencode" --version
+          "$HOME/.local/bin/claude" --version
 
       - name: Handle event
         env:
