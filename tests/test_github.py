@@ -242,3 +242,31 @@ def test_bad_command_gets_usage_reply_for_owner_only(world):
     assert world.gh.bot_comments(1) == []
     go(world, comment_event(1, "/frontera dance"))
     assert "usage" in world.gh.bot_comments(1)[0]
+
+
+def pr_comment_event(pr, text, actor="owner"):
+    name, ev = comment_event(pr, text, actor)
+    ev["issue"]["pull_request"] = {"url": "x"}
+    return name, ev
+
+
+def test_review_command_on_agent_pr_maps_to_ticket(world):
+    world.gh.add_issue(1, body=body(), labels=["state:ready"])
+    world.script.append({"files": {"src/app.py": "x = 2\n"}})
+    go(world, label_event(1))
+    head = world.forge.prs[0]["head"]
+    _git(world.work, "push", "-q", "origin", f"{head}:{head}")
+    world.gh.add_issue(101, title="PR")  # PRs are issues too
+    world.gh.pulls[101] = {"head": {"ref": head, "repo": {"full_name": REPO}}}
+    world.script.append({"result": {"verdict": "approve"}})
+    assert go(world, pr_comment_event(101, "/frontera review")) == "approve"
+    assert "review:approve" in world.gh.labels(1)
+
+
+def test_pr_commands_ignore_forks_and_non_agent_branches(world):
+    world.gh.add_issue(5, title="PR")
+    world.gh.pulls[5] = {"head": {"ref": "agent/SHI-1-x", "repo": {"full_name": "someone/fork"}}}
+    assert go(world, pr_comment_event(5, "/frontera review")) == "ignored: not an agent PR"
+    world.gh.pulls[5] = {"head": {"ref": "feature/x", "repo": {"full_name": REPO}}}
+    assert go(world, pr_comment_event(5, "/frontera review")) == "ignored: not an agent PR"
+    assert world.launches == []

@@ -12,6 +12,7 @@ class FakeGh:
         self.issues = {}
         self.comments = {}
         self.perms = {"owner": "admin"}
+        self.pulls = {}
         self.calls = []
         self._ids = count(1000)
 
@@ -35,6 +36,8 @@ class FakeGh:
         q = {k: v[0] for k, v in parse_qs(u.query).items()}
         if method == "GET" and (m := re.fullmatch(r"issues/(\d+)", p)):
             return self.issues[int(m.group(1))]
+        if method == "GET" and (m := re.fullmatch(r"pulls/(\d+)", p)):
+            return self.pulls[int(m.group(1))]
         if method == "GET" and (m := re.fullmatch(r"issues/(\d+)/comments", p)):
             return self.comments.get(int(m.group(1)), [])
         if method == "GET" and p == "issues":

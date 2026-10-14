@@ -43,7 +43,7 @@ The repos are public, so anyone can open issues and comment. Before doing anythi
 | Event | Who | What happens |
 |---|---|---|
 | Label `state:ready` added | Owner | Route the ticket. `auto` endpoint: run it. `on_command` endpoint: set `state:awaiting-command` and say so |
-| Comment `/frontera run [endpoint]` | Owner | Run now. The comment is the **owner command** (quoted and linked), so `on_command` endpoints like Claude may run |
+| Comment `/frontera run [endpoint]` (on the ticket, or on its agent PR for any command) | Owner | Run now. The comment is the **owner command** (quoted and linked), so `on_command` endpoints like Claude may run |
 | Comment `/frontera review` | Owner | Review the ticket's PR with the review lane (Claude, falling back to Qwen) |
 | Comment `/frontera fix` | Owner | After `changes`: re-run at the current tier with the review in the handoff |
 | Comment `/frontera promote` | Owner | Move to the next tier by hand |

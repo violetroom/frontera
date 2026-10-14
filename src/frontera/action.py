@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 import os
 from pathlib import Path
 
@@ -46,6 +47,16 @@ class GitHubForge:
         self.gh.api("POST", f"repos/{self.repo}/pulls/{number}/reviews", {"body": body, "event": "COMMENT"})
 
 
+def ticket_number_for_pr(tracker: GitHubTracker, pr_number: int) -> int | None:
+    """The ticket an agent PR belongs to, from its same-repo branch agent/<PROJECT>-<n>-..."""
+    pr = tracker.gh.api("GET", f"repos/{tracker.repo}/pulls/{pr_number}")
+    head = pr.get("head") or {}
+    if (head.get("repo") or {}).get("full_name") != tracker.repo:
+        return None  # forks never map to tickets
+    m = re.match(rf"agent/{re.escape(tracker.project)}-(\d+)-", head.get("ref", ""))
+    return int(m.group(1)) if m else None
+
+
 def _owner_command(text: str, url: str | None) -> str:
     quoted = " ".join(text.split())[:500]
     return f'"{quoted}"' + (f" ({url})" if url else "")
@@ -66,15 +77,15 @@ def handle(cfg: Config, event_name: str, event: dict, ctx: Ctx) -> str:
         return "; ".join([f"#{issue['number']}: {result}", *drained])
 
     if event_name == "issue_comment":
-        if event.get("action") != "created" or event["issue"].get("pull_request"):
-            return "ignored: not a new issue comment"
+        if event.get("action") != "created":
+            return "ignored: not a new comment"
         comment = event["comment"]
         try:
             cmd = parse_command(comment.get("body", ""))
         except CommandError as e:
             if is_owner(tracker.permission(comment["user"]["login"])):
-                ticket = tracker.get(event["issue"]["number"])
-                tracker.comment(ticket, f"`{e}`")
+                tracker.gh.api("POST", f"repos/{tracker.repo}/issues/{event['issue']['number']}/comments",
+                               {"body": f"`{e}`"})
             return f"ignored: {e}"
         if cmd is None:
             return "ignored: no /frontera command"
@@ -82,7 +93,14 @@ def handle(cfg: Config, event_name: str, event: dict, ctx: Ctx) -> str:
         if not (is_owner(tracker.permission(author)) and author == actor):
             return f"ignored: {author} is not an owner"
         owner = _owner_command(comment["body"], comment.get("html_url"))
-        ticket = tracker.get(event["issue"]["number"])
+        number = event["issue"]["number"]
+        if event["issue"].get("pull_request"):
+            number = ticket_number_for_pr(tracker, number)
+            if number is None:
+                tracker.gh.api("POST", f"repos/{tracker.repo}/issues/{event['issue']['number']}/comments",
+                               {"body": "Frontera commands on a PR work only on agent PRs (branch `agent/...`)."})
+                return "ignored: not an agent PR"
+        ticket = tracker.get(number)
         if cmd.verb == "run":
             return run_ticket(ctx, ticket, owner, cmd.endpoint)
         if cmd.verb == "review":

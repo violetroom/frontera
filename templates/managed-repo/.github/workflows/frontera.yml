@@ -1,5 +1,6 @@
 # Frontera: agents work on tickets in this repo. See https://github.com/violetroom/frontera
-# Triggers: adding the state:ready label, a "/frontera ..." comment, or a manual batch run.
+# Triggers: adding the state:ready label, a "/frontera ..." comment on a ticket or its agent PR,
+# or a manual batch run.
 # Frontera itself checks that whoever caused the event has admin or maintain permission.
 name: frontera
 
@@ -27,7 +28,7 @@ jobs:
   agent:
     if: >-
       (github.event_name == 'issues' && github.event.label.name == 'state:ready') ||
-      (github.event_name == 'issue_comment' && !github.event.issue.pull_request &&
+      (github.event_name == 'issue_comment' &&
        startsWith(github.event.comment.body, '/frontera') &&
        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)) ||
       github.event_name == 'workflow_dispatch'
