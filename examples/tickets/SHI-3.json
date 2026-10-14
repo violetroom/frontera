@@ -1,0 +1,11 @@
+{
+  "key": "SHI-3",
+  "project": "SHI",
+  "summary": "Survey Python MCP SDK release status",
+  "status": "Ready",
+  "kind": "research",
+  "tier": 1,
+  "agent_eligible": true,
+  "acceptance_criteria": ["Report the current stable release and its transport support, with sources"],
+  "context_pack": ["docs/development/DECISIONS.md"]
+}

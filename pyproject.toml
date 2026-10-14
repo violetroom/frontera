@@ -1,0 +1,20 @@
+[project]
+name = "frontera"
+version = "0.0.1"
+description = "Jira-driven dispatcher that routes tickets to coding agents by task kind and tier"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = ["pyyaml>=6"]
+
+[project.scripts]
+frontera = "frontera.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

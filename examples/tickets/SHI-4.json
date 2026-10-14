@@ -1,0 +1,10 @@
+{
+  "key": "SHI-4",
+  "project": "SHI",
+  "summary": "Pick the production hostname",
+  "status": "Backlog",
+  "kind": "code",
+  "tier": 1,
+  "agent_eligible": false,
+  "acceptance_criteria": []
+}

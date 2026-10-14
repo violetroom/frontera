@@ -1,0 +1,53 @@
+# Copy to ~/.config/frontera/config.yaml (or point FRONTERA_CONFIG at it) and edit.
+# Never commit the real file: it names private paths and endpoints.
+
+tracker:
+  kind: local                      # jira arrives later
+  path: ~/.local/share/frontera/tickets
+
+state_dir: ~/.local/state/frontera   # run logs, context packs, endpoint cooling
+
+privacy:
+  private_terms: []                # real hostnames, account names, etc. Blocks any run that sends them
+
+projects:
+  SHI:
+    repo: ~/path/to/Shiroe
+    base_branch: main
+    check_command: "python -m pytest -q"
+    research_dir: docs/research
+
+tiers: [1, 2, 3]
+
+endpoints:
+  qwen-27b:
+    harness: opencode
+    model: tellico-0/qwen3.8-27b-gsq-iq3s
+    launch: auto
+    max_concurrent: 1              # one OpenCode session already uses several cluster slots
+  claude-pro:
+    harness: claude-code
+    launch: on_command             # only when you ask Hermes for it (D5)
+    max_concurrent: 1
+    max_runs_per_command: 3
+  codex-plus:
+    harness: codex
+    launch: disabled               # D6: until Hermes's Plus usage is measured
+  # qwen-flash-next:
+  #   harness: opencode
+  #   model: <provider/model id>
+  #   launch: auto
+  #   provider: { base_url_env: QWEN_FLASH_URL, api_key_env: QWEN_FLASH_KEY }
+  # gemini-research:
+  #   harness: api
+  #   provider: { name: google, api_key_env: GEMINI_API_KEY, tools: [web_search] }
+  #   launch: auto
+  #   projects: [SHI]
+
+lanes:
+  code/1:     { endpoints: [qwen-27b],   wall_clock: 45m, attempts: 2, promote_to: code/3 }
+  code/2:     { endpoints: [qwen-27b],   wall_clock: 90m, attempts: 2, promote_to: code/3 }
+  code/3:     { endpoints: [claude-pro], wall_clock: 60m, attempts: 1 }
+  research/1: { endpoints: [qwen-27b],   wall_clock: 30m, attempts: 1, promote_to: research/3 }
+  research/3: { endpoints: [claude-pro], wall_clock: 45m, attempts: 1 }
+  review:     { endpoints: [claude-pro], fallback: [qwen-27b] }

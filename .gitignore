@@ -1,0 +1,12 @@
+.DS_Store
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+dist/
+# Per-run output and user config never belong in the repo
+.frontera/
+.private/
+config.yaml
+.env
+.env.*

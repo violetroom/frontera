@@ -1,0 +1,16 @@
+{
+  "key": "SHI-1",
+  "project": "SHI",
+  "summary": "Add a test for probe_ssh timeout handling",
+  "status": "Ready",
+  "kind": "code",
+  "tier": 1,
+  "agent_eligible": true,
+  "description": "scripts/probe_ssh.py should report a timeout distinctly from a refused connection.",
+  "acceptance_criteria": [
+    "A unit test covers the timeout path",
+    "Existing tests still pass"
+  ],
+  "context_pack": ["AGENTS.md", "scripts/probe_ssh.py", "tests/test_probe_ssh.py"],
+  "allowed_paths": ["scripts/probe_ssh.py", "tests/**"]
+}

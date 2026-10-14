@@ -1,0 +1,13 @@
+{
+  "key": "SHI-2",
+  "project": "SHI",
+  "summary": "Draft the step 0.5 prototype module layout",
+  "status": "Awaiting Command",
+  "kind": "code",
+  "tier": 3,
+  "agent_eligible": true,
+  "risk": "medium",
+  "acceptance_criteria": ["Package layout matches the accepted architecture decisions"],
+  "context_pack": ["AGENTS.md", "docs/development/DECISIONS.md"],
+  "allowed_paths": ["src/**", "tests/**", "pyproject.toml"]
+}
