@@ -51,6 +51,8 @@ class Ticket:
     last_endpoint: str | None = None
     review_verdict: str | None = None
     handoff_notes: list[str] = field(default_factory=list)
+    number: int | None = None  # tracker issue number, when the tracker has one
+    pr_number: int | None = None
 
     def __post_init__(self) -> None:
         if self.current_tier is None:

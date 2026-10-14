@@ -13,6 +13,7 @@ _FIELDS = {
     "key", "project", "summary", "status", "kind", "tier", "description", "current_tier",
     "promotions", "attempts", "agent_eligible", "risk", "acceptance_criteria", "context_pack",
     "allowed_paths", "pin_endpoint", "last_endpoint", "review_verdict", "handoff_notes",
+    "number", "pr_number",
 }
 
 

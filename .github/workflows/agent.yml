@@ -1,0 +1,81 @@
+# Reusable workflow: handle one ticket event for a managed repo.
+# Called by templates/managed-repo/.github/workflows/frontera.yml. See docs/GITHUB.md.
+name: frontera-agent
+
+on:
+  workflow_call:
+    inputs:
+      frontera_ref:
+        description: Git ref of violetroom/frontera to install
+        type: string
+        default: main
+      config:
+        type: string
+        default: .github/frontera.yaml
+      opencode_version:
+        type: string
+        default: "2.0.26"
+      claude_version:
+        type: string
+        default: "2.1.299"
+    secrets:
+      TELLICO_GATEWAY_URL:
+        required: false
+      TELLICO_API_KEY:
+        required: false
+      CLAUDE_CODE_OAUTH_TOKEN:
+        required: false
+      FRONTERA_PRIVATE_TERMS:
+        required: false
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install frontera
+        env:
+          FRONTERA_REF: ${{ inputs.frontera_ref }}
+        run: python -m pip install -q "git+https://github.com/violetroom/frontera@${FRONTERA_REF}"
+
+      - name: Install agent CLIs
+        env:
+          OPENCODE_VERSION: ${{ inputs.opencode_version }}
+          CLAUDE_VERSION: ${{ inputs.claude_version }}
+        run: |
+          curl -fsSL https://opencode.ai/install | VERSION="$OPENCODE_VERSION" bash
+          echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
+          curl -fsSL https://claude.ai/install.sh | bash -s "$CLAUDE_VERSION"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Handle event
+        env:
+          CONFIG: ${{ inputs.config }}
+          GH_TOKEN: ${{ github.token }}
+          TELLICO_GATEWAY_URL: ${{ secrets.TELLICO_GATEWAY_URL }}
+          TELLICO_API_KEY: ${{ secrets.TELLICO_API_KEY }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          FRONTERA_PRIVATE_TERMS: ${{ secrets.FRONTERA_PRIVATE_TERMS }}
+        run: frontera --config "$CONFIG" action
+
+      - name: Keep run records
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontera-runs-${{ github.run_id }}
+          path: .frontera/runs/
+          retention-days: 14
+          if-no-files-found: ignore

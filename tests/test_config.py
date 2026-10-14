@@ -46,3 +46,9 @@ def test_bad_launch(raw_config):
     raw_config["endpoints"]["qwen-27b"]["launch"] = "sometimes"
     with pytest.raises(ConfigError, match="launch"):
         parse_config(raw_config)
+
+
+def test_private_terms_from_env(raw_config, monkeypatch):
+    monkeypatch.setenv("FRONTERA_PRIVATE_TERMS", "host-a.example\n\n acct-b \n")
+    raw_config["privacy"] = {"private_terms": ["x"], "private_terms_env": "FRONTERA_PRIVATE_TERMS"}
+    assert parse_config(raw_config).private_terms == ("x", "host-a.example", "acct-b")

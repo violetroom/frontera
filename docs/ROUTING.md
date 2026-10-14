@@ -183,7 +183,7 @@ Each new endpoint starts on a trial: run 3–5 tickets already completed elsewhe
 
 ## Jira changes
 
-These replace the plan's Agent Profile field and extend its workflow:
+*Superseded by D9: GitHub labels and the state comment carry these fields. See [GITHUB.md](GITHUB.md#labels).* Kept for the record:
 
 | Field | Values |
 |---|---|

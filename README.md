@@ -1,14 +1,15 @@
 # frontera
 
-A dispatcher that routes tracker tickets (Jira, planned) to coding agents by task kind and difficulty tier. Qwen processes ordinary tickets automatically. Claude takes promoted tickets and reviews when you ask for it. You talk to a Hermes manager agent, which drives the `frontera` CLI.
+A dispatcher that routes GitHub issues to coding agents running in GitHub Actions, by task kind and difficulty tier. Qwen processes ordinary tickets automatically. Claude takes promoted tickets and reviews when you ask for it. You talk to a Hermes manager agent, which drives the `frontera` CLI.
 
 - [Plan](docs/PLAN.md): architecture, gates, build sequence
 - [Routing](docs/ROUTING.md): kinds, tiers, lanes, endpoints, launch policies, promotion
+- [GitHub design](docs/GITHUB.md): labels, commands, the run lifecycle, setting up a repo
 - [Decisions](docs/DECISIONS.md)
 
 ## Status
 
-Step 2 (dry run) is done. There is config validation, lane routing, preflight checks, a secret and privacy scanner, and a context-pack and prompt builder, all running against a local JSON ticket tracker. Agents are not launched yet. The Jira adapter and real runs come in step 3.
+The GitHub version is built and unit-tested (89 tests). It covers the issue tracker, owner-only triggers, routing, runs with promotion, independent verification, draft PRs, and agent review. The Qwen/OpenCode adapter has run for real against Tellico. The Claude adapter and the first end-to-end Actions run are next.
 
 ## Use
 
@@ -17,7 +18,7 @@ uv sync
 cp config.example.yaml ~/.config/frontera/config.yaml   # then edit: repo paths, tracker path, private_terms
 uv run frontera config check
 uv run frontera next
-uv run frontera run SHI-1 --dry-run
+uv run frontera run SHI-1 --dry-run              # local tracker; GitHub runs happen in Actions
 uv run frontera run SHI-2 --dry-run --owner-command "do the promoted tickets"
 uv run frontera review SHI-5 --dry-run --owner-command "review the finished tickets"
 uv run pytest

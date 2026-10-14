@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -12,13 +13,19 @@ from .models import Status, execution_id
 from .preflight import preflight
 from .routing import route, route_review
 from .state import EndpointState
-from .tracker import TrackerError, make_tracker
+from .tracker import GitHubTracker, TrackerError, make_tracker
 
 EXIT_BLOCKED = 2
 
 
 def _owner(cmd: str | None) -> str | None:
     return cmd.strip() if cmd and cmd.strip() else None
+
+
+def _endpoint_state(cfg, tracker) -> EndpointState:
+    if isinstance(tracker, GitHubTracker):
+        return EndpointState(active=tracker.active_counts())
+    return EndpointState.load(cfg.state_dir)
 
 
 def cmd_config_check(args, cfg) -> int:
@@ -36,8 +43,8 @@ def cmd_config_check(args, cfg) -> int:
 
 
 def cmd_next(args, cfg) -> int:
-    tracker = make_tracker(cfg.tracker)
-    state = EndpointState.load(cfg.state_dir)
+    tracker = make_tracker(cfg)
+    state = _endpoint_state(cfg, tracker)
     tickets = tracker.list(args.project, {Status.READY, Status.AWAITING_COMMAND})
     if not tickets:
         print("nothing ready")
@@ -54,9 +61,9 @@ def cmd_run(args, cfg) -> int:
         print("real runs arrive in step 3; use --dry-run", file=sys.stderr)
         return EXIT_BLOCKED
     owner = _owner(args.owner_command)
-    tracker = make_tracker(cfg.tracker)
+    tracker = make_tracker(cfg)
     ticket = tracker.get(args.key)
-    state = EndpointState.load(cfg.state_dir)
+    state = _endpoint_state(cfg, tracker)
     rt = route(ticket, cfg, state, owner, args.endpoint)
     problems = preflight(ticket, cfg, rt, owner)
 
@@ -87,18 +94,68 @@ def cmd_review(args, cfg) -> int:
     if not args.dry_run:
         print("reviews arrive in step 4; use --dry-run", file=sys.stderr)
         return EXIT_BLOCKED
-    tracker = make_tracker(cfg.tracker)
+    tracker = make_tracker(cfg)
     ticket = tracker.get(args.key)
     if ticket.status != Status.IN_REVIEW:
         print(f"{ticket.key} is {ticket.status}, not In Review")
         return EXIT_BLOCKED
-    rt, self_review = route_review(ticket, cfg, EndpointState.load(cfg.state_dir), _owner(args.owner_command))
+    rt, self_review = route_review(ticket, cfg, _endpoint_state(cfg, tracker), _owner(args.owner_command))
     if not rt.ok:
         print(f"{ticket.key}: review waits: {rt.wait} ({rt.detail})")
         return EXIT_BLOCKED
     note = " (self-review: flag for closer human review)" if self_review else ""
     print(f"{ticket.key}: would review with {rt.endpoint.name}{note}")
     return 0
+
+
+LABELS = {
+    "state:ready": ("0e8a16", "Approved for an agent; adding it starts a run"),
+    "state:working": ("fbca04", "An agent run is in progress"),
+    "state:awaiting-command": ("d93f0b", "Next endpoint runs only on /frontera run"),
+    "state:in-review": ("1d76db", "Draft PR open"),
+    "state:changes-requested": ("e99695", "Review asked for changes; /frontera fix to rerun"),
+    "state:needs-decision": ("b60205", "Needs the owner: ambiguous, blocked, or out of tiers"),
+    "state:failed": ("5a5a5a", "Transient failure; add state:ready to retry"),
+    "kind:code": ("c5def5", "Code task"),
+    "kind:research": ("c5def5", "Research task"),
+    "tier:1": ("bfdadc", "Current tier: mechanical"),
+    "tier:2": ("bfdadc", "Current tier: moderate"),
+    "tier:3": ("bfdadc", "Current tier: hard"),
+    "risk:high": ("b60205", "Runs only on an explicit /frontera run"),
+    "human-only": ("000000", "Never dispatched to an agent"),
+    "review:approve": ("0e8a16", "Agent review recommends merging"),
+    "review:changes": ("e99695", "Agent review requested changes"),
+    "review:block": ("b60205", "Agent review blocked the PR"),
+    "review:self": ("fbca04", "Approved by the authoring endpoint; review closely"),
+}
+
+
+def cmd_labels(args, cfg) -> int:
+    import subprocess
+
+    names = dict(LABELS)
+    for ep in cfg.endpoints:
+        names[f"on:{ep}"] = ("ededed", f"Being worked on by {ep}")
+        names[f"pin:{ep}"] = ("ededed", f"Force endpoint {ep}")
+    for name, (color, desc) in names.items():
+        cmd = ["gh", "label", "create", name, "--color", color, "--description", desc, "--force", "-R", args.repo]
+        if args.dry_run:
+            print(" ".join(cmd))
+            continue
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+        print(f"{'ok' if proc.returncode == 0 else 'FAILED'}  {name}" + (f": {proc.stderr.strip()}" if proc.returncode else ""))
+    return 0
+
+
+def cmd_action(args, cfg) -> int:
+    from .action import main_action
+
+    name = args.event_name or os.environ.get("GITHUB_EVENT_NAME")
+    path = args.event_path or os.environ.get("GITHUB_EVENT_PATH")
+    if not name or not path:
+        print("frontera action runs inside GitHub Actions (needs GITHUB_EVENT_NAME/PATH)", file=sys.stderr)
+        return 1
+    return main_action(cfg, name, path)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -127,6 +184,15 @@ def build_parser() -> argparse.ArgumentParser:
     v.add_argument("--owner-command")
     v.add_argument("--dry-run", action="store_true")
     v.set_defaults(func=cmd_review)
+    lb = sub.add_parser("labels", help="create or update Frontera's labels on a GitHub repo")
+    lb.add_argument("--repo", required=True, help="owner/name")
+    lb.add_argument("--dry-run", action="store_true")
+    lb.set_defaults(func=cmd_labels)
+
+    a = sub.add_parser("action", help="handle a GitHub Actions event (issues, issue_comment, workflow_dispatch)")
+    a.add_argument("--event-name")
+    a.add_argument("--event-path")
+    a.set_defaults(func=cmd_action)
     return p
 
 

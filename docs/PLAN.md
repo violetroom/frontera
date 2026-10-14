@@ -1,6 +1,6 @@
 # Frontera plan v0: Jira-managed, multi-provider coding agents
 
-Status: **draft, 2026-10-14.** Nothing here is built or tested. Accepted so far ([decisions](DECISIONS.md)): Jira (D1), Hermes on OpenAI as manager (D2), and you talk to Hermes, which launches the workers (D3). Routing by task kind and tier, with Claude started only on your command for promoted tickets and reviews, and Codex coding disabled (D4–D7). Routing is specified in [ROUTING.md](ROUTING.md).
+Status: **draft, 2026-10-14.** *Jira was replaced by GitHub (D9) and agents run in Actions (D10). [GITHUB.md](GITHUB.md) supersedes the Jira and dispatcher parts of §2.1–2.2 and step 1. Steps 3–4 (real runs, routing, promotion, review) are implemented for GitHub; see GITHUB.md for what has been validated.* Nothing here is built or tested. Accepted so far ([decisions](DECISIONS.md)): Jira (D1), Hermes on OpenAI as manager (D2), and you talk to Hermes, which launches the workers (D3). Routing by task kind and tier, with Claude started only on your command for promoted tickets and reviews, and Codex coding disabled (D4–D7). Routing is specified in [ROUTING.md](ROUTING.md).
 
 ## 1. Problem
 

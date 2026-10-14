@@ -1,0 +1,45 @@
+# Frontera: agents work on tickets in this repo. See https://github.com/violetroom/frontera
+# Triggers: adding the state:ready label, a "/frontera ..." comment, or a manual batch run.
+# Frontera itself checks that whoever caused the event has admin or maintain permission.
+name: frontera
+
+on:
+  issues:
+    types: [labeled]
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      command:
+        description: Batch command
+        type: choice
+        options: [run-awaiting, review-pending, drain]
+      note:
+        description: Why (recorded as the owner command)
+        type: string
+        required: false
+
+concurrency:
+  group: frontera-${{ github.event.issue.number || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  agent:
+    if: >-
+      (github.event_name == 'issues' && github.event.label.name == 'state:ready') ||
+      (github.event_name == 'issue_comment' && !github.event.issue.pull_request &&
+       startsWith(github.event.comment.body, '/frontera') &&
+       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)) ||
+      github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    uses: violetroom/frontera/.github/workflows/agent.yml@main
+    with:
+      frontera_ref: main
+    secrets:
+      TELLICO_GATEWAY_URL: ${{ secrets.TELLICO_GATEWAY_URL }}
+      TELLICO_API_KEY: ${{ secrets.TELLICO_API_KEY }}
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      FRONTERA_PRIVATE_TERMS: ${{ secrets.FRONTERA_PRIVATE_TERMS }}

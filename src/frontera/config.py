@@ -74,6 +74,7 @@ class Project:
     base_branch: str = "main"
     check_command: str | None = None
     research_dir: str = "docs/research"
+    github_repo: str | None = None  # owner/name, for the github tracker
 
 
 @dataclass(frozen=True)
@@ -81,6 +82,7 @@ class Config:
     tracker: dict[str, Any]
     state_dir: Path
     private_terms: tuple[str, ...]
+    bot_logins: tuple[str, ...]
     projects: dict[str, Project]
     tiers: tuple[int, ...]
     endpoints: dict[str, Endpoint]
@@ -122,10 +124,11 @@ def parse_config(raw: dict[str, Any]) -> Config:
             raise ConfigError(f"project {key}: missing repo")
         projects[key] = Project(
             key=key,
-            repo=_expand(p["repo"]),
+            repo=_expand(p["repo"]).resolve(),
             base_branch=p.get("base_branch", "main"),
             check_command=p.get("check_command"),
             research_dir=p.get("research_dir", "docs/research"),
+            github_repo=p.get("github_repo"),
         )
 
     endpoints = {}
@@ -163,7 +166,8 @@ def parse_config(raw: dict[str, Any]) -> Config:
     cfg = Config(
         tracker=dict(raw.get("tracker") or {"kind": "local"}),
         state_dir=_expand(raw.get("state_dir", "~/.local/state/frontera")),
-        private_terms=tuple((raw.get("privacy") or {}).get("private_terms") or ()),
+        private_terms=_private_terms(raw.get("privacy") or {}),
+        bot_logins=tuple((raw.get("github") or {}).get("bot_logins") or ("github-actions[bot]",)),
         projects=projects,
         tiers=tiers,
         endpoints=endpoints,
@@ -171,6 +175,15 @@ def parse_config(raw: dict[str, Any]) -> Config:
     )
     validate(cfg)
     return cfg
+
+
+def _private_terms(privacy: dict[str, Any]) -> tuple[str, ...]:
+    """Literal terms plus, for public config files, newline-separated terms from an env var (a secret)."""
+    terms = list(privacy.get("private_terms") or ())
+    env_name = privacy.get("private_terms_env")
+    if env_name:
+        terms += [t.strip() for t in os.environ.get(env_name, "").splitlines() if t.strip()]
+    return tuple(terms)
 
 
 def validate(cfg: Config) -> None:
