@@ -71,6 +71,25 @@ def changed_files(repo: Path) -> list[str]:
     return sorted(set(files))
 
 
+# Git conflict markers at line start: ``<<<<<<<``, ``=======`` or ``>>>>>>>`` (7+ chars).
+_CONFLICT = re.compile(r"^(?:<{7,}|={7,}|>{7,})", re.MULTILINE)
+
+
+def has_conflict_markers(text: str) -> bool:
+    """True when ``text`` still contains git conflict markers at line start."""
+    return bool(_CONFLICT.search(text))
+
+
+def conflict_files(repo: Path, files: list[str]) -> list[str]:
+    """Changed files whose working-tree content still contains conflict markers."""
+    out = []
+    for f in files:
+        path = repo / f
+        if path.is_file() and has_conflict_markers(path.read_bytes().decode(errors="replace")):
+            out.append(f)
+    return out
+
+
 def added_text(repo: Path, files: list[str]) -> dict[str, str]:
     """Lines each change adds: diff additions for tracked files, whole content for new ones."""
     tracked = set(git(repo, "ls-files", "-z").split("\0"))
@@ -100,6 +119,7 @@ class Verification:
     outside: list[str] = field(default_factory=list)
     protected: list[str] = field(default_factory=list)
     findings: list[Finding] = field(default_factory=list)
+    conflict_files: list[str] = field(default_factory=list)
     check_ok: bool | None = None  # None: no check configured
     check_output: str = ""
 
@@ -112,7 +132,8 @@ def verify(repo: Path, allowed: list[str], private_terms: tuple[str, ...], check
            timeout_s: int = 1200, protected: tuple[str, ...] = ()) -> Verification:
     files = changed_files(repo)
     v = Verification(files=files, outside=[f for f in files if not path_allowed(f, allowed)],
-                     protected=[f for f in files if protected and path_allowed(f, list(protected))])
+                     protected=[f for f in files if protected and path_allowed(f, list(protected))],
+                     conflict_files=conflict_files(repo, files))
     for f, text in added_text(repo, files).items():
         v.findings += scan_text(text, f, private_terms)
     if check_command:

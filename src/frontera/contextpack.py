@@ -39,7 +39,7 @@ class Pack:
     findings: list[Finding] = field(default_factory=list)
 
 
-def render_ticket(ticket: Ticket, allowed: list[str]) -> str:
+def render_ticket(ticket: Ticket, allowed: list[str], conflicts: list[str] | None = None) -> str:
     lines = [
         f"# {ticket.key}",
         "",
@@ -61,6 +61,12 @@ def render_ticket(ticket: Ticket, allowed: list[str]) -> str:
         "## Context files",
         *([f"- `{p}`" for p in ticket.context_pack] or ["- (none listed)"]),
     ]
+    if conflicts:
+        lines += ["", "## Merge conflicts to resolve",
+                  "The base branch was merged into this branch and these files conflict:"]
+        lines += [f"- `{f}`" for f in conflicts]
+        lines += ["Resolve every conflict marker (`<<<<<<<`, `=======`, `>>>>>>>`) in them; "
+                 "resolving the merge is part of this task."]
     if ticket.handoff_notes:
         lines += ["", "## Earlier attempts (handoff)", _fence("\n\n".join(ticket.handoff_notes))]
     return "\n".join(lines) + "\n"
@@ -83,9 +89,18 @@ _KIND_SECTION = {
 }
 
 
-def build_pack(ticket: Ticket, project: Project, cfg: Config, endpoint: Endpoint, exec_id: str) -> Pack:
+def _conflict_note(conflicts: list[str] | None) -> str:
+    if not conflicts:
+        return ""
+    files = ", ".join(f"`{f}`" for f in conflicts)
+    return (f"The base branch was merged into this branch and these files conflict: {files}. "
+            "Resolving every conflict marker in them is required before you finish.")
+
+
+def build_pack(ticket: Ticket, project: Project, cfg: Config, endpoint: Endpoint, exec_id: str,
+               conflicts: list[str] | None = None) -> Pack:
     allowed = default_allowed_paths(ticket, project)
-    ticket_md = render_ticket(ticket, allowed)
+    ticket_md = render_ticket(ticket, allowed, conflicts)
 
     findings = scan_text(ticket_md, f"{ticket.key} (ticket)", cfg.private_terms)
     context_bytes = len(ticket_md.encode())
@@ -107,6 +122,7 @@ def build_pack(ticket: Ticket, project: Project, cfg: Config, endpoint: Endpoint
         pack_dir=PACK_DIR,
         kind_instructions=_KIND_SECTION[ticket.kind],
         check_command=project.check_command or "(none configured; say so in your result)",
+        conflict_note=_conflict_note(conflicts),
     )
     manifest = {
         "execution_id": exec_id,
