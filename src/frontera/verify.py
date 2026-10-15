@@ -6,7 +6,7 @@ import re
 import subprocess
 from dataclasses import dataclass, field
 from functools import lru_cache
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from .contextpack import PACK_DIR
 from .harness import scrubbed_env
@@ -38,6 +38,41 @@ def _glob_re(pattern: str) -> re.Pattern[str]:
 
 def path_allowed(path: str, patterns: list[str]) -> bool:
     return any(_glob_re(p).match(path) for p in patterns)
+
+
+def _has_wildcard(pattern: str) -> bool:
+    return any(w in part for part in PurePosixPath(pattern.strip()).parts for w in ("*", "?"))
+
+
+def _leading_dir(pattern: str) -> tuple[str, ...]:
+    """Path components before the first wildcard component (``()`` when it starts with one)."""
+    out = []
+    for part in PurePosixPath(pattern.strip()).parts:
+        if any(w in part for w in ("*", "?")):
+            break
+        out.append(part)
+    return tuple(out)
+
+
+def globs_overlap(a: str, b: str) -> bool:
+    """True when two Allowed Paths globs may match the same file.
+
+    They overlap when either matches the other's literal path, or when their
+    leading non-wildcard directory paths are equal or one contains the other.
+    """
+    a, b = a.strip(), b.strip()
+    if not _has_wildcard(a) and path_allowed(a, [b]):
+        return True
+    if not _has_wildcard(b) and path_allowed(b, [a]):
+        return True
+    da, db = _leading_dir(a), _leading_dir(b)
+    shorter, longer = (da, db) if len(da) <= len(db) else (db, da)
+    return longer[:len(shorter)] == shorter
+
+
+def paths_overlap(a: list[str], b: list[str]) -> bool:
+    """True when any glob in ``a`` overlaps any glob in ``b``."""
+    return any(globs_overlap(x, y) for x in a for y in b)
 
 
 def git(repo: Path, *args: str, check: bool = True) -> str:

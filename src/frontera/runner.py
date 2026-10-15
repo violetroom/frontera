@@ -23,7 +23,7 @@ from .preflight import default_allowed_paths, preflight
 from .routing import WaitReason, promotion_target, route, route_lane, route_review
 from .state import EndpointState
 from .tracker.github import GitHubTracker, Meta
-from .verify import Verification, changed_files, git, run_check, verify
+from .verify import Verification, changed_files, git, paths_overlap, run_check, verify
 
 BOT_NAME = "github-actions[bot]"
 BOT_EMAIL = "41898282+github-actions[bot]@users.noreply.github.com"
@@ -282,6 +282,27 @@ def _needs_decision(ctx: Ctx, t: Ticket, why: str) -> None:
     ctx.tracker.comment(t, f"**Needs your decision**\n\n{why}\n\nEdit the ticket, then add `state:ready` again.")
 
 
+def _held_by(ctx: Ctx, t: Ticket) -> list[Ticket]:
+    """Open tickets in Agent Working or In Review whose Allowed Paths overlap ``t``'s."""
+    mine = default_allowed_paths(t, ctx.project)
+    if not mine:
+        return []
+    return [o for o in ctx.tracker.list(statuses={Status.AGENT_WORKING, Status.IN_REVIEW})
+            if o.number != t.number
+            and paths_overlap(mine, default_allowed_paths(o, ctx.project))]
+
+
+def _hold(ctx: Ctx, t: Ticket, held: list[Ticket]) -> None:
+    """Leave ``t`` in Ready and name the overlapping tickets; comment once per held set."""
+    numbers = sorted(o.number for o in held)
+    if numbers == ctx.tracker.meta(t.number).held_for:
+        return
+    names = ", ".join(f"#{o.number} ({o.status})" for o in held)
+    ctx.tracker.comment(t, f"**Held**\n\nAllowed Paths overlap open ticket(s): {names}. "
+                           f"It stays Ready and runs once they close; `/frontera run` runs it anyway.")
+    _save(ctx, t, f"Held: allowed paths overlap {names}", held_for=numbers)
+
+
 def _handle_failed_attempt(ctx: Ctx, t: Ticket, a: Attempt) -> str | None:
     """Shared endings for decision/transient attempts; None means the caller continues."""
     if a.kind == "decision":
@@ -312,6 +333,11 @@ def run_ticket(ctx: Ctx, t: Ticket, owner_command: str | None = None, endpoint: 
         if problems:
             _needs_decision(ctx, t, "Preflight blocked this ticket:\n" + _fmt_list(str(p) for p in problems))
             return "blocked"
+
+        held = _held_by(ctx, t)
+        if held and not owner_command:
+            _hold(ctx, t, held)
+            return "held"
 
         a = attempt(ctx, t, rt.endpoint)
         t.last_endpoint = rt.endpoint.name
@@ -557,12 +583,15 @@ def fix_ticket(ctx: Ctx, t: Ticket, owner_command: str) -> str:
 
 
 def drain(ctx: Ctx, limit: int, skip: set[int] = frozenset()) -> list[str]:
-    """Run other Ready tickets whose auto endpoint has room; workflow-made label changes don't trigger jobs."""
+    """Run other Ready tickets whose auto endpoint has room; workflow-made label changes don't trigger jobs.
+
+    Held tickets (Allowed Paths overlapping an open agent ticket) are skipped: they stay
+    Ready and run once the overlap closes, or on an explicit ``/frontera run``."""
     done = []
     for t in ctx.tracker.list(statuses={Status.READY}):
         if len(done) >= limit:
             break
-        if t.number in skip:
+        if t.number in skip or _held_by(ctx, t):
             continue
         rt = route(t, ctx.cfg, _state(ctx))
         if rt.ok:

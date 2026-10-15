@@ -2,7 +2,8 @@ import subprocess
 
 import pytest
 
-from frontera.verify import added_text, changed_files, conflict_files, has_conflict_markers, path_allowed, verify
+from frontera.verify import (added_text, changed_files, conflict_files, globs_overlap,
+                             has_conflict_markers, path_allowed, paths_overlap, verify)
 
 
 @pytest.mark.parametrize("path,patterns,ok", [
@@ -19,6 +20,38 @@ from frontera.verify import added_text, changed_files, conflict_files, has_confl
 ])
 def test_globs(path, patterns, ok):
     assert path_allowed(path, patterns) is ok
+
+
+@pytest.mark.parametrize("a,b,overlap", [
+    # literal vs literal: only the same file overlaps
+    ("src/app.py", "src/app.py", True),
+    ("src/app.py", "src/other.py", False),
+    ("src/app.py", "docs/a.py", False),
+    # literal vs glob: the glob matches the literal path
+    ("src/app.py", "src/**", True),
+    ("src/app.py", "src/*.py", True),
+    ("src/app.py", "docs/**", False),
+    ("src/app.py", "src/other/*.py", False),
+    # nested directories: one leading directory path contains the other
+    ("src/**", "src/sub/x.py", True),
+    ("src/**", "src/sub/**", True),
+    ("src/sub/**", "src/**", True),
+    ("src/sub/**", "src/other/**", False),
+    # disjoint paths
+    ("src/**", "docs/**", False),
+    ("src/**", "src2/**", False),  # no string-prefix false positive
+    ("docs/*.md", "docs/a.md", True),
+    ("**/c.py", "src/c.py", True),
+])
+def test_globs_overlap(a, b, overlap):
+    assert globs_overlap(a, b) is overlap
+    assert globs_overlap(b, a) is overlap
+
+
+def test_paths_overlap():
+    assert paths_overlap(["src/**"], ["docs/**", "src/app.py"])
+    assert not paths_overlap(["src/**"], ["docs/**"])
+    assert not paths_overlap([], ["src/**"])
 
 
 def _commit_all(repo):

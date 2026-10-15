@@ -213,10 +213,67 @@ def test_preflight_block(world):
 
 def test_drain_runs_other_ready_tickets(world):
     world.gh.add_issue(1, body=body(), labels=["state:ready"])
-    world.gh.add_issue(2, body=body(), labels=["state:ready"])
-    world.script += [{"files": {"src/app.py": "a\n"}}, {"files": {"src/app.py": "b\n"}}]
+    world.gh.add_issue(2, body=body(allowed=("docs/**",)), labels=["state:ready"])  # disjoint from #1's src/**
+    world.script += [{"files": {"src/app.py": "a\n"}}, {"files": {"docs/x.md": "b\n"}}]
     out = go(world, label_event(1))
     assert "SHI-2: pr" in out and len(world.forge.prs) == 2
+
+
+def test_held_when_paths_overlap_open_pr(world):
+    _open_pr(world)  # #1 -> draft PR, In Review, Allowed Paths src/**
+    world.gh.add_issue(2, body=body(allowed=("src/app.py",)), labels=["state:ready"])
+    world.script.append({"files": {"src/app.py": "x = 9\n"}})
+    out = go(world, label_event(2))
+    assert "held" in out and len(world.launches) == 1  # not run
+    assert "state:ready" in world.gh.labels(2)
+    held = [c for c in world.gh.bot_comments(2) if c.startswith("**Held**")]
+    assert len(held) == 1 and "#1" in held[0]
+
+
+def test_held_by_working_ticket(world):
+    world.gh.add_issue(1, body=body(), labels=["state:working"])  # stuck in Agent Working, allowed src/**
+    world.gh.add_issue(2, body=body(allowed=("src/app.py",)), labels=["state:ready"])
+    world.script.append({"files": {"src/app.py": "x = 9\n"}})
+    out = go(world, label_event(2))
+    assert "held" in out and world.launches == []
+    assert any("#1" in c for c in world.gh.bot_comments(2))
+
+
+def test_held_comments_once_per_held_set(world):
+    _open_pr(world)
+    world.gh.add_issue(2, body=body(allowed=("src/app.py",)), labels=["state:ready"])
+    world.script.append({"files": {"src/app.py": "x = 9\n"}})
+    assert "held" in go(world, label_event(2))
+    assert "held" in go(world, label_event(2))  # re-labeled while still held
+    assert sum(c.startswith("**Held**") for c in world.gh.bot_comments(2)) == 1
+
+
+def test_drain_skips_held_and_runs_others(world):
+    _open_pr(world)  # #1 In Review, allowed src/**
+    world.gh.add_issue(2, body=body(allowed=("src/app.py",)), labels=["state:ready"])
+    world.gh.add_issue(3, body=body(allowed=("docs/**",)), labels=["state:ready"])
+    world.script.append({"files": {"docs/x.md": "d\n"}})
+    out = go(world, label_event(2))
+    assert "#2: held" in out and "SHI-3: pr" in out
+    assert len(world.forge.prs) == 2
+    assert "state:ready" in world.gh.labels(2) and "state:in-review" in world.gh.labels(3)
+    # A later drain skips #2 again without commenting a second time.
+    world.gh.add_issue(4, body=body(allowed=("notes/**",)), labels=["state:ready"])
+    world.script.append({"files": {"notes/4.md": "n\n"}})
+    out = go(world, label_event(4))
+    assert "#4: pr" in out and "SHI-2" not in out
+    assert sum(c.startswith("**Held**") for c in world.gh.bot_comments(2)) == 1
+
+
+def test_owner_run_overrides_hold(world):
+    _open_pr(world)  # #1 In Review
+    world.gh.add_issue(2, body=body(allowed=("src/app.py",)), labels=["state:ready"])
+    world.script.append({"files": {"src/app.py": "x = 9\n"}})
+    assert "held" in go(world, label_event(2))
+    world.script.append({"files": {"src/app.py": "x = 10\n"}})
+    assert go(world, comment_event(2, "/frontera run")) == "pr"
+    assert world.launches[-1].kind == "code"
+    assert "state:in-review" in world.gh.labels(2)
 
 
 def _open_pr(world, number=1, tier=1):
