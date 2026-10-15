@@ -199,6 +199,12 @@ class GitHubTracker:
         self._replace_prefixed(ticket.number, "review:", f"review:{verdict}", current)
         ticket.review_verdict = verdict
 
+    def close(self, ticket: Ticket) -> None:
+        """Close the ticket issue. GitHub does not auto-close linked issues when the merge is
+        made with the workflow token, so the dispatcher closes it itself."""
+        self.gh.api("PATCH", f"repos/{self.repo}/issues/{ticket.number}",
+                    {"state": "closed", "state_reason": "completed"})
+
     def comment(self, ticket: Ticket, body: str) -> None:
         self.gh.api("POST", f"repos/{self.repo}/issues/{ticket.number}/comments", {"body": body})
 

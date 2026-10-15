@@ -62,6 +62,12 @@ class FakeGh:
                     if c["id"] == int(m.group(1)):
                         c["body"] = body["body"]
                         return c
+        if method == "PATCH" and (m := re.fullmatch(r"issues/(\d+)", p)):
+            i = self.issues[int(m.group(1))]
+            i["state"] = body.get("state", i["state"])
+            if "state_reason" in body:
+                i["state_reason"] = body["state_reason"]
+            return i
         if method == "GET" and (m := re.fullmatch(r"collaborators/(.+)/permission", p)):
             role = self.perms.get(unquote(m.group(1)), "none")
             return {"permission": "admin" if role == "admin" else role, "role_name": role}
