@@ -234,6 +234,7 @@ def test_review_test_approve_all_pass_merges(world):
     assert world.launches[1].endpoint.name == "claude-pro" and world.launches[2].endpoint.name.startswith("qwen")
     assert world.forge.merged == [101]
     assert not [l for l in world.gh.labels(1) if l.startswith("state:")]
+    assert world.gh.issues[1]["state"] == "closed" and world.gh.issues[1]["state_reason"] == "completed"
 
 
 def test_failed_review_sends_back_fixes_same_pr_then_merges(world):
@@ -301,8 +302,10 @@ def test_approve_alone_merges_and_reports_conflicts(world):
     world.forge.merge_result = (False, "it has merge conflicts")
     assert go(world, comment_event(1, "/frontera approve")) == "merge_failed"
     assert any("merge conflicts" in c for c in world.gh.bot_comments(1))
+    assert world.gh.issues[1]["state"] == "open"  # a failed merge leaves the issue open
     world.forge.merge_result = (True, "merged")
     assert go(world, comment_event(1, "/frontera approve")) == "merged"
+    assert world.gh.issues[1]["state"] == "closed" and world.gh.issues[1]["state_reason"] == "completed"
 
 
 def test_run_then_chain_in_one_command(world):

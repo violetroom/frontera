@@ -413,6 +413,7 @@ def _merge(ctx: Ctx, t: Ticket, meta: Meta, owner_command: str) -> str:
         ctx.tracker.comment(t, f"Could not merge PR #{meta.pr_number}: {msg}")
         return "merge_failed"
     ctx.tracker.set_status(t, Status.DONE)
+    ctx.tracker.close(t)  # workflow-token merges do not auto-close the linked issue
     _save(ctx, t, f"Merged PR #{meta.pr_number}.")
     ctx.tracker.comment(t, f"Merged PR #{meta.pr_number} on your command {owner_command}.")
     return "merged"
