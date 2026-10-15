@@ -30,6 +30,12 @@ on:
           Pinned to a reviewed commit; bump deliberately.
         type: string
         default: "bf48214871fc3c1c0963dc41ca88bdeb1dc28433"
+      remote_control:
+        description: >-
+          Publish Qwen/OpenCode sessions to the Tellico relay (<gateway host>/tellico/) so the owner can
+          watch and steer them live. Signs in with TELLICO_API_KEY. Claude Code runs are not covered.
+        type: boolean
+        default: false
     secrets:
       TELLICO_GATEWAY_URL:
         required: false
@@ -90,6 +96,24 @@ jobs:
           git -C "$d" checkout -q FETCH_HEAD
           test "$(git -C "$d" rev-parse HEAD)" = "$TELLICO_SETUP_REF"
           echo "TELLICO_SETUP_DIR=$d" >> "$GITHUB_ENV"
+
+      - name: Configure remote control
+        if: inputs.remote_control
+        # The key goes to a private file for the plugin; only its path and the relay URL go to the env.
+        env:
+          TELLICO_GATEWAY_URL: ${{ secrets.TELLICO_GATEWAY_URL }}
+          TELLICO_API_KEY: ${{ secrets.TELLICO_API_KEY }}
+          REPO: ${{ github.repository }}
+        run: |
+          key="$RUNNER_TEMP/tellico-relay-key"
+          ( umask 077; printf '%s' "$TELLICO_API_KEY" > "$key" )
+          url="${TELLICO_GATEWAY_URL%/}"
+          {
+            echo "TELLICO_REMOTE_CONTROL=1"
+            echo "TELLICO_RELAY_URL=${url%/v1}/tellico"
+            echo "TELLICO_RELAY_KEY_FILE=$key"
+            echo "TELLICO_RELAY_MACHINE=actions ${REPO#*/}"
+          } >> "$GITHUB_ENV"
 
       - name: Handle event
         env:

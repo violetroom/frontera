@@ -39,6 +39,7 @@ jobs:
     uses: violetroom/frontera/.github/workflows/agent.yml@main
     with:
       frontera_ref: main
+      remote_control: true   # watch/steer Qwen runs from the Tellico relay app
     secrets:
       TELLICO_GATEWAY_URL: ${{ secrets.TELLICO_GATEWAY_URL }}
       TELLICO_API_KEY: ${{ secrets.TELLICO_API_KEY }}
