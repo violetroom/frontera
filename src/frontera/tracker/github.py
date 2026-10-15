@@ -41,6 +41,7 @@ class Meta:
     execution_id: str | None = None
     gate_failures: int = 0
     handoff_notes: list[str] = field(default_factory=list)
+    held_for: list[int] = field(default_factory=list)  # tickets whose open paths overlap this one
 
     @classmethod
     def from_dict(cls, d: dict) -> "Meta":
