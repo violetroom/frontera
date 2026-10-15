@@ -325,6 +325,35 @@ def test_fix_leftover_markers_rejected(world):
     assert _origin_file(world, head, "src/app.py") == "x = 2\n"
 
 
+def test_fix_conflict_with_main_change_outside_allowed_paths(world):
+    head = _open_pr(world)
+    _advance_main(world, {"src/app.py": "x = 100\n", "notes.md": "main's note\n"})
+    world.script.append({"files": {"src/app.py": "x = 42\n"}})  # the worker resolves the conflict
+    assert go(world, comment_event(1, "/frontera fix")) == "pr"
+    # notes.md is outside Allowed Paths but came in through the merge, not from the worker,
+    # so it is not scope-checked; it still lands on the PR branch.
+    assert _origin_file(world, head, "src/app.py") == "x = 42\n"
+    assert _origin_file(world, head, "notes.md") == "main's note\n"
+    assert world.forge.pushed.count(head) == 2
+
+
+def test_fix_merge_failure_needs_decision(world):
+    head = _open_pr(world)
+    # Force the PR branch to unrelated history, so the base merge cannot run.
+    url = _git_out(world.work, "remote", "get-url", "origin").strip()
+    stray = world.work.parent / "stray"
+    subprocess.run(["git", "init", "-q", "-b", head, str(stray)], check=True, capture_output=True)
+    (stray / "src").mkdir()
+    (stray / "src" / "app.py").write_text("x = 2\n")
+    _git(stray, "add", "-A")
+    _git(stray, "-c", "user.name=t", "-c", "user.email=t@e", "commit", "-qm", "unrelated")
+    _git(stray, "push", "-q", "-f", url, head)
+    world.script.append({"files": {"src/app.py": "x = 3\n"}})
+    assert "decision" in go(world, comment_event(1, "/frontera fix"))
+    assert any("unrelated histories" in c for c in world.gh.bot_comments(1))
+    assert len(world.forge.pushed) == 1  # the fix was not started, nothing was pushed
+
+
 def test_three_failures_promote_and_close_pr(world):
     _open_pr(world)
     world.script += [
