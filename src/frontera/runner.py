@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import time
 from dataclasses import dataclass, field
 from importlib import resources
 from pathlib import Path
@@ -23,6 +24,7 @@ from .preflight import default_allowed_paths, preflight
 from .routing import WaitReason, promotion_target, route, route_lane, route_review
 from .state import EndpointState
 from .tracker.github import GitHubTracker, Meta
+from .usage import write_launch_record
 from .verify import Verification, changed_files, git, paths_overlap, run_check, verify
 
 BOT_NAME = "github-actions[bot]"
@@ -134,6 +136,21 @@ def _read_result(path: Path, exec_id: str) -> dict | None:
     return data
 
 
+def _launch_outcome(res: LaunchResult, result: dict | None) -> str:
+    """Outcome of the launch itself: the worker's reported outcome/verdict, or how the process ended."""
+    if res.error_class:
+        return res.error_class
+    if res.timed_out:
+        return "timeout"
+    if result is None:
+        return "no_result"
+    for key in ("verdict", "outcome"):
+        value = result.get(key)
+        if isinstance(value, str):
+            return value
+    return "no_result"
+
+
 def _fmt_list(items) -> str:
     return "\n".join(f"- {i}" for i in items) or "- (none)"
 
@@ -181,12 +198,14 @@ def attempt(ctx: Ctx, t: Ticket, ep: Endpoint, fix_branch: str | None = None) ->
     write_pack(pack, ctx.repo / PACK_DIR)
     write_pack(pack, run_dir)
 
+    started = time.monotonic()
     res = ctx.launcher(LaunchSpec(ep, t.kind.value, pack.prompt, ctx.repo, lane.wall_clock_s, run_dir / "agent.log"))
     result = _read_result(ctx.repo / PACK_DIR / "result.json", exec_id)
     if result is not None:
         (run_dir / "result.json").write_text(json.dumps(result, indent=2))
-    (run_dir / "launch.json").write_text(json.dumps(
-        {"returncode": res.returncode, "timed_out": res.timed_out, "error_class": res.error_class, "usage": res.usage}, indent=2))
+    write_launch_record(run_dir, execution_id=exec_id, endpoint=ep.name, harness=ep.harness,
+                        kind=t.kind.value, lane=lane.name, wall_s=time.monotonic() - started,
+                        outcome=_launch_outcome(res, result), res=res)
 
     if res.error_class in ("rate_limit", "outage"):
         return Attempt("transient", f"{ep.name} reported {res.error_class.replace('_', ' ')}:\n```\n{res.output_tail[-1500:]}\n```")
@@ -404,10 +423,14 @@ def _launch_gate(ctx: Ctx, t: Ticket, ep: Endpoint, kind: str, prompt_name: str,
     run_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy(pack_dir / "ticket.md", run_dir / "ticket.md")
     lane = ctx.cfg.lanes[lane_name]
+    started = time.monotonic()
     res = ctx.launcher(LaunchSpec(ep, kind, prompt, ctx.repo, lane.wall_clock_s or 1800, run_dir / "agent.log"))
     result = _read_result(pack_dir / "result.json", exec_id)
     if result is not None:
         (run_dir / "result.json").write_text(json.dumps(result, indent=2))
+    write_launch_record(run_dir, execution_id=exec_id, endpoint=ep.name, harness=ep.harness,
+                        kind=kind, lane=lane_name, wall_s=time.monotonic() - started,
+                        outcome=_launch_outcome(res, result), res=res)
     return result, res
 
 
