@@ -97,7 +97,7 @@ def world(tmp_path):
     raw["endpoints"]["qwen-27b"]["provider"] = {"base_url_env": "X", "api_key_env": "Y"}
     cfg = parse_config(raw)
     gh = FakeGh()
-    forge = FakeForge()
+    forge = FakeForge(work)
     script = []
     launches = []
 
@@ -218,22 +218,102 @@ def test_drain_runs_other_ready_tickets(world):
     assert "SHI-2: pr" in out and len(world.forge.prs) == 2
 
 
-def test_review_changes_then_fix(world):
-    world.gh.add_issue(1, body=body(), labels=["state:ready"])
+def _open_pr(world, number=1, tier=1):
+    """Ticket -> Qwen run -> draft PR on a branch that really exists on origin."""
+    world.gh.add_issue(number, body=body(tier=tier), labels=["state:ready"])
     world.script.append({"files": {"src/app.py": "x = 2\n"}})
-    go(world, label_event(1))
-    head = world.forge.prs[0]["head"]
-    _git(world.work, "push", "-q", "origin", f"{head}:{head}")  # FakeForge doesn't push; do it for the review fetch
+    go(world, label_event(number))
+    return world.forge.prs[-1]["head"]
 
-    world.script.append({"result": {"verdict": "changes", "comments": [{"path": "src/app.py", "line": 1, "body": "wrong"}]}})
-    assert go(world, comment_event(1, "/frontera review")) == "changes"
-    assert world.launches[-1].endpoint.name == "claude-pro" and world.launches[-1].kind == "review"
-    assert world.forge.reviews and "wrong" in world.forge.reviews[0][1]
-    assert {"state:changes-requested", "review:changes"} <= set(world.gh.labels(1))
 
-    world.script.append({"files": {"src/app.py": "x = 5\n"}})
-    assert go(world, comment_event(1, "/frontera fix")) == "pr"
-    assert world.forge.closed == [101] and len(world.forge.prs) == 2
+def test_review_test_approve_all_pass_merges(world):
+    _open_pr(world)
+    world.script += [{"result": {"verdict": "approve"}}, {"result": {"verdict": "pass"}}]
+    assert go(world, comment_event(1, "/frontera review test approve")) == "merged"
+    assert [l.kind for l in world.launches[1:]] == ["review", "test"]
+    assert world.launches[1].endpoint.name == "claude-pro" and world.launches[2].endpoint.name.startswith("qwen")
+    assert world.forge.merged == [101]
+    assert not [l for l in world.gh.labels(1) if l.startswith("state:")]
+
+
+def test_failed_review_sends_back_fixes_same_pr_then_merges(world):
+    head = _open_pr(world)
+    world.script += [
+        {"result": {"verdict": "changes", "comments": [{"path": "src/app.py", "line": 1, "body": "use 3"}]}},
+        {"files": {"src/app.py": "x = 3\n"}},          # coder fix on the same branch
+        {"result": {"verdict": "approve"}},             # re-review
+    ]
+    assert go(world, comment_event(1, "/frontera review approve")) == "merged"
+    fix = world.launches[2]
+    assert fix.kind == "code" and fix.endpoint.name.startswith("qwen")
+    fix_pack = (fix.log_path.parent / "ticket.md").read_text()
+    assert "Earlier attempts (handoff)" in fix_pack and "use 3" in fix_pack
+    assert world.forge.pushed.count(head) == 2 and len(world.forge.prs) == 1  # fix pushed to the same PR
+    assert world.ctx.tracker.meta(1).gate_failures == 1
+    assert any("Fix pushed" in b for _, b in world.forge.pr_comments)
+
+
+def test_three_failures_promote_and_close_pr(world):
+    _open_pr(world)
+    world.script += [
+        {"result": {"verdict": "fail", "problems": ["boom"]}},   # test fails (1)
+        {"files": {"src/app.py": "x = 4\n"}},                    # fix
+        {"result": {"verdict": "fail", "problems": ["boom"]}},   # test fails (2)
+        {"files": {"src/app.py": "x = 5\n"}},                    # fix
+        {"result": {"verdict": "fail", "problems": ["boom"]}},   # test fails (3) -> promote
+    ]
+    out = go(world, comment_event(1, "/frontera test approve"))
+    assert out == "promoted:awaiting_command"
+    assert world.forge.closed == [101] and world.forge.merged == []
+    labels = world.gh.labels(1)
+    assert "tier:3" in labels and "state:awaiting-command" in labels
+    assert world.ctx.tracker.meta(1).gate_failures == 0
+
+
+def test_failed_check_fails_test_without_launching_tester(world):
+    _open_pr(world)
+    world.cfg.projects["SHI"].__dict__["check_command"] = "exit 1"  # frozen dataclass; test-only override
+    world.script.append({"outcome": "failed"})  # the fix attempt fails too
+    n = len(world.launches)
+    go(world, comment_event(1, "/frontera test"))
+    assert all(l.kind != "test" for l in world.launches[n:])
+    assert any("project check" in b for _, b in world.forge.pr_comments)
+
+
+def test_tester_that_edits_files_fails(world):
+    _open_pr(world)
+    world.script += [{"files": {"src/app.py": "hacked\n"}, "result": {"verdict": "pass"}},
+                     {"files": {"src/app.py": "x = 9\n"}}, {"result": {"verdict": "pass"}}]
+    assert go(world, comment_event(1, "/frontera test approve")) == "merged"
+    assert any("modified repository files" in b for _, b in world.forge.pr_comments)
+    assert world.ctx.tracker.meta(1).gate_failures == 1
+
+
+def test_block_needs_decision(world):
+    _open_pr(world)
+    world.script.append({"result": {"verdict": "block"}})
+    assert go(world, comment_event(1, "/frontera review approve")) == "blocked"
+    assert "state:needs-decision" in world.gh.labels(1) and world.forge.merged == []
+
+
+def test_approve_alone_merges_and_reports_conflicts(world):
+    _open_pr(world)
+    world.forge.merge_result = (False, "it has merge conflicts")
+    assert go(world, comment_event(1, "/frontera approve")) == "merge_failed"
+    assert any("merge conflicts" in c for c in world.gh.bot_comments(1))
+    world.forge.merge_result = (True, "merged")
+    assert go(world, comment_event(1, "/frontera approve")) == "merged"
+
+
+def test_run_then_chain_in_one_command(world):
+    world.gh.add_issue(1, body=body(), labels=["state:awaiting-command"])
+    world.script += [{"files": {"src/app.py": "x = 2\n"}}, {"result": {"verdict": "approve"}}]
+    assert go(world, comment_event(1, "/frontera run review approve")) == "merged"
+
+
+def test_chain_needs_open_pr(world):
+    world.gh.add_issue(1, body=body(), labels=["state:ready"])
+    assert go(world, comment_event(1, "/frontera review")) == "ignored"
 
 
 def test_bad_command_gets_usage_reply_for_owner_only(world):
@@ -255,11 +335,10 @@ def test_review_command_on_agent_pr_maps_to_ticket(world):
     world.script.append({"files": {"src/app.py": "x = 2\n"}})
     go(world, label_event(1))
     head = world.forge.prs[0]["head"]
-    _git(world.work, "push", "-q", "origin", f"{head}:{head}")
     world.gh.add_issue(101, title="PR")  # PRs are issues too
     world.gh.pulls[101] = {"head": {"ref": head, "repo": {"full_name": REPO}}}
     world.script.append({"result": {"verdict": "approve"}})
-    assert go(world, pr_comment_event(101, "/frontera review")) == "approve"
+    assert go(world, pr_comment_event(101, "/frontera review")) == "passed"
     assert "review:approve" in world.gh.labels(1)
 
 

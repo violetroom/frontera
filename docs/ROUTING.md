@@ -35,6 +35,7 @@ Decide which model works on which ticket from a config file, not from code, so t
 | `code` | Diff, then a draft PR | Diff stays inside Allowed Paths, secret/privacy scan, project check command, CI | Denied |
 | `research` | One Markdown report at a set path (e.g. `docs/research/SHI-31.md`), then a PR | Only that file changed; it has a Sources section; privacy scan | **Allowed** (web search), so research endpoints get no other write access |
 | `review` | Review of an open agent PR: verdict + comments | Verdict is one of `approve`/`changes`/`block`, each comment cites a file and line | Denied; read-only worktree |
+| `test` | Execution report on an open agent PR: verdict + per-criterion evidence | Project check passes on the PR head; no repository file changed; verdict `pass`/`fail` | Denied; scratch files only |
 
 Later kinds, such as `docs` or `decision-draft`, are added the same way: an output contract plus a verification recipe. Hermes keeps drafting tickets and decision text itself in conversation. That is not a dispatched kind.
 
@@ -146,6 +147,7 @@ lanes:
   research/1: { endpoints: [qwen-27b], wall_clock: 30m, attempts: 1, promote_to: research/3 }
   research/3: { endpoints: [claude-pro], wall_clock: 45m, attempts: 1 }
   review:   { endpoints: [claude-pro], fallback: [qwen-27b] }
+  test:     { endpoints: [qwen-27b], wall_clock: 30m }
 ```
 
 `code/1` promotes straight to `code/3` for now, because no endpoint is stronger than Qwen and weaker than Claude yet. When you add, say, `qwen-flash-next`, put it in `code/2` and change `code/1`'s `promote_to` to `code/2`. No code changes.

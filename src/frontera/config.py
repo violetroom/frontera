@@ -21,6 +21,7 @@ from .models import Kind
 DEFAULT_CONFIG_PATH = Path("~/.config/frontera/config.yaml")
 HARNESSES = {"opencode", "claude-code", "codex", "api"}
 REVIEW_LANE = "review"
+TEST_LANE = "test"
 
 
 class ConfigError(ValueError):
@@ -189,11 +190,11 @@ def _private_terms(privacy: dict[str, Any]) -> tuple[str, ...]:
 def validate(cfg: Config) -> None:
     kinds = {k.value for k in Kind}
     for lane in cfg.lanes.values():
-        if lane.name == REVIEW_LANE:
+        if lane.name in (REVIEW_LANE, TEST_LANE):
             pass
         elif lane.kind not in kinds or lane.tier not in cfg.tiers:
             raise ConfigError(
-                f"lane {lane.name}: name must be review or <kind>/<tier> with kind in "
+                f"lane {lane.name}: name must be review, test or <kind>/<tier> with kind in "
                 f"{sorted(kinds)} and tier in {list(cfg.tiers)}"
             )
         if not lane.endpoints:

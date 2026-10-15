@@ -61,3 +61,4 @@ lanes:
   research/1: { endpoints: [qwen-n0, qwen-n1], wall_clock: 30m, attempts: 1, promote_to: research/3 }
   research/3: { endpoints: [claude-pro], wall_clock: 45m, attempts: 1 }
   review:     { endpoints: [claude-pro], fallback: [qwen-n0, qwen-n1], wall_clock: 30m }
+  test:       { endpoints: [qwen-n0, qwen-n1], wall_clock: 30m }   # runs the code against the criteria

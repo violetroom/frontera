@@ -39,6 +39,7 @@ class Meta:
     pr_number: int | None = None
     branch: str | None = None
     execution_id: str | None = None
+    gate_failures: int = 0
     handoff_notes: list[str] = field(default_factory=list)
 
     @classmethod

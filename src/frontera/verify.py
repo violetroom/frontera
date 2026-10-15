@@ -84,6 +84,16 @@ def added_text(repo: Path, files: list[str]) -> dict[str, str]:
     return out
 
 
+def run_check(repo: Path, command: str, timeout_s: int = 1200) -> tuple[bool, str]:
+    """Run the project's check. Agent-written code runs here, so it gets a scrubbed environment."""
+    try:
+        proc = subprocess.run(command, shell=True, cwd=repo, capture_output=True, text=True,
+                              timeout=timeout_s, env=scrubbed_env([]))
+    except subprocess.TimeoutExpired:
+        return False, f"check timed out after {timeout_s}s"
+    return proc.returncode == 0, (proc.stdout + proc.stderr)[-4000:]
+
+
 @dataclass
 class Verification:
     files: list[str]
@@ -104,12 +114,5 @@ def verify(repo: Path, allowed: list[str], private_terms: tuple[str, ...], check
     for f, text in added_text(repo, files).items():
         v.findings += scan_text(text, f, private_terms)
     if check_command:
-        try:
-            # Agent-written code runs here, so it gets the same scrubbed environment as the agent.
-            proc = subprocess.run(check_command, shell=True, cwd=repo, capture_output=True, text=True,
-                                  timeout=timeout_s, env=scrubbed_env([]))
-            v.check_ok = proc.returncode == 0
-            v.check_output = (proc.stdout + proc.stderr)[-4000:]
-        except subprocess.TimeoutExpired:
-            v.check_ok, v.check_output = False, f"check timed out after {timeout_s}s"
+        v.check_ok, v.check_output = run_check(repo, check_command, timeout_s)
     return v

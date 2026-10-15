@@ -9,6 +9,7 @@ from __future__ import annotations
 import base64
 import json
 import re
+import time
 import os
 from pathlib import Path
 
@@ -16,7 +17,7 @@ from .commands import CommandError, is_owner, parse_command
 from .config import Config
 from .gh import Gh
 from .models import Status
-from .runner import Ctx, drain, fix_ticket, promote_ticket, review_ticket, run_ticket
+from .runner import Ctx, drain, fix_ticket, promote_ticket, run_chain, run_ticket
 from .tracker import make_tracker
 from .tracker.github import GitHubTracker, STATE_LABELS
 from .verify import git
@@ -45,6 +46,35 @@ class GitHubForge:
 
     def review_pr(self, number: int, body: str) -> None:
         self.gh.api("POST", f"repos/{self.repo}/pulls/{number}/reviews", {"body": body, "event": "COMMENT"})
+
+    def comment_pr(self, number: int, body: str) -> None:
+        self.gh.api("POST", f"repos/{self.repo}/issues/{number}/comments", {"body": body})
+
+    def merge_pr(self, number: int, branch: str) -> tuple[bool, str]:
+        pr = self.gh.api("GET", f"repos/{self.repo}/pulls/{number}")
+        for _ in range(10):  # GitHub computes mergeability asynchronously
+            if pr.get("mergeable") is not None:
+                break
+            time.sleep(3)
+            pr = self.gh.api("GET", f"repos/{self.repo}/pulls/{number}")
+        if pr.get("state") != "open":
+            return False, f"PR is {pr.get('state')}"
+        if pr.get("mergeable") is False:
+            return False, "it has merge conflicts with the base branch; resolve them (or `/frontera fix`) first"
+        if pr.get("draft"):
+            self.gh.api("POST", "graphql", {
+                "query": "mutation($id: ID!) { markPullRequestReadyForReview(input: {pullRequestId: $id}) { clientMutationId } }",
+                "variables": {"id": pr["node_id"]}})
+        try:
+            self.gh.api("PUT", f"repos/{self.repo}/pulls/{number}/merge",
+                        {"merge_method": "squash", "sha": pr["head"]["sha"]})
+        except Exception as e:  # e.g. a ruleset blocks the merge
+            return False, str(e)[-500:]
+        try:
+            self.gh.api("DELETE", f"repos/{self.repo}/git/refs/heads/{branch}")
+        except Exception:
+            pass
+        return True, "merged"
 
 
 def ticket_number_for_pr(tracker: GitHubTracker, pr_number: int) -> int | None:
@@ -101,13 +131,16 @@ def handle(cfg: Config, event_name: str, event: dict, ctx: Ctx) -> str:
                                {"body": "Frontera commands on a PR work only on agent PRs (branch `agent/...`)."})
                 return "ignored: not an agent PR"
         ticket = tracker.get(number)
-        if cmd.verb == "run":
-            return run_ticket(ctx, ticket, owner, cmd.endpoint)
-        if cmd.verb == "review":
-            return review_ticket(ctx, ticket, owner)
         if cmd.verb == "fix":
             return fix_ticket(ctx, ticket, owner)
-        return promote_ticket(ctx, ticket, owner)
+        if cmd.verb == "promote":
+            return promote_ticket(ctx, ticket, owner)
+        if cmd.verb == "run":
+            result = run_ticket(ctx, ticket, owner, cmd.endpoint)
+            if result != "pr" or not cmd.chain:
+                return result
+            ticket = tracker.get(number)
+        return run_chain(ctx, ticket, cmd.chain, owner)
 
     if event_name == "workflow_dispatch":
         if not is_owner(tracker.permission(actor)):
@@ -133,7 +166,7 @@ def handle(cfg: Config, event_name: str, event: dict, ctx: Ctx) -> str:
         elif command == "review-pending":
             for t in tracker.list(statuses={Status.IN_REVIEW}):
                 if t.review_verdict is None:
-                    out.append(f"{t.key}: {review_ticket(ctx, t, owner)}")
+                    out.append(f"{t.key}: {run_chain(ctx, t, ('review',), owner)}")
         elif command == "drain":
             out = drain(ctx, DRAIN_LIMIT)
         else:

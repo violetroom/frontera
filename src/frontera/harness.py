@@ -29,7 +29,7 @@ class HarnessError(RuntimeError):
 @dataclass
 class LaunchSpec:
     endpoint: Endpoint
-    kind: str  # code | research | review
+    kind: str  # code | research | review | test
     prompt: str
     cwd: Path
     timeout_s: int | None
@@ -97,6 +97,7 @@ def build_command(spec: LaunchSpec, source: dict[str, str] | None = None) -> tup
             "code": ["Read", "Edit", "Write", "Glob", "Grep", "Bash"],
             "research": ["Read", "Write", "Glob", "Grep", "WebSearch", "WebFetch"],
             "review": ["Read", "Glob", "Grep", "Write", "Bash(git diff:*)", "Bash(git log:*)"],
+            "test": ["Read", "Write", "Edit", "Glob", "Grep", "Bash"],
         }[spec.kind]
         cmd = ["claude", "-p", spec.prompt, "--output-format", "json",
                "--permission-mode", "acceptEdits", "--allowedTools", ",".join(tools)]

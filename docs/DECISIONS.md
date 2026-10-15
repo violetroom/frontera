@@ -102,3 +102,15 @@ Workflows on GitHub-hosted runners run `frontera` and the worker harness in a di
 Still to check: `claude-code-action` with a Pro `CLAUDE_CODE_OAUTH_TOKEN`; reaching the Tellico gateway from hosted runners.
 
 Owner, 2026-10-14: "we can do actions."
+
+| ID | Date | Decision | Status |
+|---|---|---|---|
+| D11 | 2026-10-15 | Gate chains (`review`, `test`, `approve`), an executing tester lane, fixes on the same PR, and promotion after 3 failed cycles | Accepted |
+
+## D11: Chains, tester, approve
+
+The owner can chain gates in one comment, e.g. `/frontera review test approve`. A failing gate sends the PR back to the coder with its findings, and the fix is pushed to the same branch. After three failed cycles on a tier, the ticket is promoted. A new `test` lane (Qwen by default) actually runs the code against each acceptance criterion; it can't change repository files. `/frontera approve` merges on the owner's command. The merge is performed by the workflow bot and recorded with the quoted command, so "a human merges" still holds. If a ruleset later requires the owner's review, the bot's merge would need to be allowed to bypass it, which is a separate decision.
+
+Promotion into an `on_command` lane still waits for an explicit `/frontera run` (consistent with D5).
+
+Owner, 2026-10-15: "Yes I'd like frontera approve. Also, is it possible we can add an agent that actually runs the code … chain commands like 'frontera review test' or 'frontera review test approve' to conditionally merge if it is approved or to send it back to the coding agent with comments if review fails? I think failing 3 times should result in the ticket being promoted in difficulty."

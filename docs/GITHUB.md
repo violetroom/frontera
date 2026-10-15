@@ -43,11 +43,14 @@ The repos are public, so anyone can open issues and comment. Before doing anythi
 | Event | Who | What happens |
 |---|---|---|
 | Label `state:ready` added | Owner | Route the ticket. `auto` endpoint: run it. `on_command` endpoint: set `state:awaiting-command` and say so |
-| Comment `/frontera run [endpoint]` (on the ticket, or on its agent PR for any command) | Owner | Run now. The comment is the **owner command** (quoted and linked), so `on_command` endpoints like Claude may run |
-| Comment `/frontera review` | Owner | Review the ticket's PR with the review lane (Claude, falling back to Qwen) |
-| Comment `/frontera fix` | Owner | After `changes`: re-run at the current tier with the review in the handoff |
-| Comment `/frontera promote` | Owner | Move to the next tier by hand |
+| `/frontera run [endpoint] [review] [test] [approve]` | Owner | Run now. The comment is the **owner command** (quoted and linked), so `on_command` endpoints like Claude may run. Any steps after it form a chain on the resulting PR |
+| `/frontera review`, `/frontera test`, `/frontera review test approve`, … | Owner | Run the gates in the order written on the ticket's PR (see [Chains](#chains)) |
+| `/frontera approve` | Owner | Merge the PR now: mark ready, squash-merge, delete the branch |
+| `/frontera fix` | Owner | Re-run the coder on the PR branch with the latest findings |
+| `/frontera promote` | Owner | Move to the next tier by hand; closes the current PR |
 | `workflow_dispatch` `run-awaiting` / `review-pending` | Owner | Batch versions: "do the promoted tickets", "review the finished tickets" |
+
+Commands work on the ticket issue or on its agent PR.
 
 The owner command is now authenticated by GitHub itself, which closes the [D5](DECISIONS.md) "dispatcher trusts Hermes" gap. When Hermes arrives, it gets its own GitHub App identity. Its comments are visibly not yours, and it can only start `auto` runs and draft tickets unless you post the command. Relaying your chat instructions as owner commands is a later, explicit decision.
 
@@ -66,14 +69,21 @@ The owner command is now authenticated by GitHub itself, which closes the [D5](D
    - **Rate limit / outage / harness crash:** → `state:failed` (transient), no attempt counted.
 8. **Drain:** before exiting, the job picks up other `state:ready` tickets whose `auto` endpoint has free capacity, up to a small limit. This is needed because label changes made by the workflow's own token don't trigger new workflows.
 
-## Review
+## Chains
 
-`/frontera review` checks out the PR branch read-only and gives the reviewer the ticket, the criteria and `git diff base...branch`. It must write `{verdict, summary, comments[]}`. The dispatcher posts a PR review with event `COMMENT`, never approve, plus a `review:` label:
-- `approve`: stays in review. You merge.
-- `changes`: → `state:changes-requested`.
-- `block`: → `state:needs-decision`.
+`/frontera review test approve` runs **gates** in the order you write them, on the ticket's PR:
 
-The reviewer differs from the author where possible ([ROUTING.md](ROUTING.md#review)).
+| Step | What it does | Pass when |
+|---|---|---|
+| `review` | Review lane (Claude, falling back to Qwen; differs from the author where possible). Reads the ticket and `git diff base...PR`, then posts a PR review (event `COMMENT`) and a `review:` label | Verdict `approve` |
+| `test` | First reruns the project check on the PR head. Then the test lane (Qwen) **runs the code** against each acceptance criterion, including edge cases, using scratch files under `.frontera/scratch/` only. It posts a report to the PR. Changing any repository file is an automatic fail | Check passes and verdict `pass` |
+| `approve` | Merges: marks the PR ready, squash-merges, deletes the branch, records your quoted command on the ticket | Every earlier gate passed. On its own, it merges straight away |
+
+When a gate **fails**, the PR goes back to the ticket's current coding lane with the findings as a handoff note. The coder pushes a fix **to the same PR branch** and the chain starts again from the first gate. Each failed gate, and each failed fix attempt, counts toward the ticket's `gate_failures`. At **3** the PR is closed and the ticket is **promoted** to the next tier, restarting from the base branch with the handoff notes. If the next lane is `on_command` (Claude), it waits for `/frontera run`, so a chain never escalates to Claude on its own. A `block` verdict (security, privacy or scope) stops the chain and goes to `state:needs-decision`. A gate that can't run (no lane, a wait, no usable verdict) stops without counting.
+
+A command covers its whole chain. `/frontera review approve` on a tier-3 ticket lets Claude review and fix within that chain, but nothing after a promotion.
+
+Merge conflicts make `approve` stop and say so. Resolve them, or `/frontera fix` and chain again.
 
 ## Known limits
 

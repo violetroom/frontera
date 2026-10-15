@@ -72,11 +72,25 @@ class FakeGh:
 
 
 class FakeForge:
-    def __init__(self):
-        self.pushed, self.prs, self.closed, self.reviews = [], [], [], []
+    def __init__(self, repo=None):
+        self.repo = repo  # when set, pushes go to the repo's real (local) origin
+        self.pushed, self.prs, self.closed, self.reviews, self.pr_comments, self.merged = [], [], [], [], [], []
+        self.merge_result = (True, "merged")
 
     def push(self, branch):
         self.pushed.append(branch)
+        if self.repo is not None:
+            import subprocess
+            subprocess.run(["git", "-C", str(self.repo), "push", "-q", "origin", f"HEAD:refs/heads/{branch}"],
+                           check=True, capture_output=True)
+
+    def comment_pr(self, number, body):
+        self.pr_comments.append((number, body))
+
+    def merge_pr(self, number, branch):
+        if self.merge_result[0]:
+            self.merged.append(number)
+        return self.merge_result
 
     def open_pr(self, title, body, head, base):
         self.prs.append({"title": title, "body": body, "head": head, "base": base})

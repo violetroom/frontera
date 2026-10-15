@@ -72,6 +72,15 @@ def route(ticket: Ticket, cfg: Config, state: EndpointState, owner_command: str 
     return _pick(lane.name, _candidates(lane.endpoints, cfg, ticket.project), state, owner_command)
 
 
+def route_lane(lane_name: str, ticket: Ticket, cfg: Config, state: EndpointState,
+               owner_command: str | None = None) -> Route:
+    """Resolve a named lane such as ``test`` for a ticket's project."""
+    lane = cfg.lanes.get(lane_name)
+    if lane is None:
+        return Route(lane_name, wait=WaitReason.NO_LANE, detail=f"no {lane_name} lane in config")
+    return _pick(lane_name, _candidates(lane.endpoints + lane.fallback, cfg, ticket.project), state, owner_command)
+
+
 def promotion_target(ticket: Ticket, cfg: Config) -> str | None:
     """The lane a ticket moves to when its current lane gives up, or None for Needs Decision."""
     lane = cfg.lanes.get(ticket.lane)
