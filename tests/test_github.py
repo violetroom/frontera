@@ -53,6 +53,54 @@ def test_state_comment_only_trusted_from_bot():
     assert len(gh.bot_comments(1)) == 1 and tr.get(1).attempts == 3
 
 
+def test_state_comment_trusted_from_any_configured_bot_login():
+    gh = FakeGh()
+    gh.add_issue(1, body=body(), labels=["state:ready"])
+    gh.add_comment(1, '<!-- frontera-state {"attempts": 4} -->', login="my-app[bot]")
+    assert GitHubTracker(gh, REPO, "SHI").get(1).attempts == 0  # default logins: App not trusted
+    tr = GitHubTracker(gh, REPO, "SHI", ("github-actions[bot]", "my-app[bot]"))
+    assert tr.get(1).attempts == 4
+    gh2 = FakeGh()
+    gh2.add_issue(1, body=body(), labels=["state:ready"])
+    gh2.add_comment(1, '<!-- frontera-state {"attempts": 4} -->', login="stranger")
+    assert GitHubTracker(gh2, REPO, "SHI", ("github-actions[bot]", "my-app[bot]")).get(1).attempts == 0
+
+
+def test_forge_uses_app_token_when_set(tmp_path):
+    from frontera.action import GitHubForge, make_forge
+    from frontera.gh import GhCli
+    tracker = GitHubTracker(FakeGh(), REPO, "SHI")
+    forge = make_forge(tracker, tmp_path, {"FRONTERA_APP_TOKEN": "app", "GH_TOKEN": "plain"})
+    assert isinstance(forge, GitHubForge) and forge.token == "app"
+    assert isinstance(forge.gh, GhCli) and forge.gh.token == "app"
+    forge = make_forge(tracker, tmp_path, {"GH_TOKEN": "plain"})
+    assert forge.token == "plain" and forge.gh is tracker.gh
+
+
+def test_ghcli_passes_token_to_gh(monkeypatch):
+    from frontera import gh as ghmod
+    seen = {}
+
+    def fake_run(cmd, **kw):
+        seen["env"] = kw["env"]
+        return subprocess.CompletedProcess(cmd, 0, stdout="{}", stderr="")
+    monkeypatch.setattr(ghmod.subprocess, "run", fake_run)
+    monkeypatch.setenv("GH_TOKEN", "plain")
+    ghmod.GhCli("app").api("GET", "repos/x/y")
+    assert seen["env"]["GH_TOKEN"] == "app"
+    ghmod.GhCli().api("GET", "repos/x/y")
+    assert seen["env"] is None
+
+
+def test_app_token_never_reaches_worker_env():
+    from frontera.harness import HarnessError, scrubbed_env
+    source = {"PATH": "/bin", "FRONTERA_APP_TOKEN": "app", "GH_TOKEN": "plain", "KEY": "k"}
+    env = scrubbed_env(["KEY"], source)
+    assert "FRONTERA_APP_TOKEN" not in env and "GH_TOKEN" not in env
+    with pytest.raises(HarnessError):
+        scrubbed_env(["FRONTERA_APP_TOKEN"], source)
+
+
 def test_labels_and_counts():
     gh = FakeGh()
     gh.add_issue(1, body=body(), labels=["state:ready", "tier:1"])

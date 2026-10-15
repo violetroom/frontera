@@ -87,7 +87,7 @@ Merge conflicts make `approve` stop and say so. Resolve them, or `/frontera fix`
 
 ## Known limits
 
-- **CI doesn't run on agent PRs yet.** PRs created with the workflow's `GITHUB_TOKEN` don't trigger other workflows. The dispatcher runs the check command itself and reports it on the PR. Fix later with a GitHub App token.
+- **CI doesn't run on agent PRs unless you set up a GitHub App.** PRs created with the workflow's `GITHUB_TOKEN` don't trigger other workflows. The dispatcher runs the check command itself and reports it on the PR. See "Using a GitHub App identity" below.
 - **Agents have open network access** on hosted runners. The VM is disposable, but a prompt-injected worker could send out its own provider token. Mitigation: only owner-approved tickets run, and the tickets are written by you or Hermes. Rotate the Claude token or Tellico key if a run looks wrong.
 - **Usage-limit cooling isn't shared between jobs** yet. A rate-limited run just fails as transient.
 - **Everything in issues, PRs and run artifacts is public.** Follow the managed repo's privacy rules (Shiroe 0013) in ticket text. The scanner blocks known patterns, not everything.
@@ -100,6 +100,30 @@ Merge conflicts make `approve` stop and say so. Resolve them, or `/frontera fix`
 3. Add the secrets the endpoints name: `TELLICO_GATEWAY_URL`, `TELLICO_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`. Optionally add `FRONTERA_PRIVATE_TERMS`, one term per line, for the privacy scanner.
 4. Org and repo **Settings → Actions → General**: allow GitHub Actions to create pull requests. Allow `violetroom/frontera`'s reusable workflow, which is the default inside the same org.
 5. Optional: a ruleset on `main` requiring a pull request and your review.
+
+## Using a GitHub App identity
+
+Optional. When `FRONTERA_APP_TOKEN` is set, the dispatcher uses it for `git push`, PR creation, PR comments, reviews and merges, so agent PRs trigger CI and auto-close keywords work. Without it, everything uses `GH_TOKEN` as before. The owner-permission check and state comments keep using `GH_TOKEN`. The App token is never passed to workers or check commands.
+
+1. Create a GitHub App (owner **Settings → Developer settings → GitHub Apps**) with repository permissions **Contents: write**, **Issues: write**, **Pull requests: write**, **Metadata: read**. Disable the webhook. Install it on the managed repo.
+2. Generate a private key. Add repo (or org) secrets `FRONTERA_APP_ID` and `FRONTERA_APP_PRIVATE_KEY`.
+3. Owner step: add this to the workflow before the Frontera step (agents may not edit `.github/**`):
+
+   ```yaml
+   - id: app-token
+     uses: actions/create-github-app-token@v1
+     with:
+       app-id: ${{ secrets.FRONTERA_APP_ID }}
+       private-key: ${{ secrets.FRONTERA_APP_PRIVATE_KEY }}
+   ```
+
+   and in that step's `env:` add `FRONTERA_APP_TOKEN: ${{ steps.app-token.outputs.token }}`.
+4. Comments made with the App appear as `<app-slug>[bot]`. Add that login to `frontera.yaml`, or state comments written by the App are not trusted:
+
+   ```yaml
+   github:
+     bot_logins: ["github-actions[bot]", "<app-slug>[bot]"]
+   ```
 
 ## Validation so far
 
