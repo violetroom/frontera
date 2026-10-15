@@ -36,16 +36,22 @@ class LocalTracker:
     def __init__(self, root: Path):
         self.root = root
 
+    def _load(self, path: Path) -> dict[str, Any]:
+        try:
+            return json.loads(path.read_text())
+        except json.JSONDecodeError as e:
+            raise TrackerError(f"malformed ticket file {path}: {e}") from None
+
     def get(self, key: str) -> Ticket:
         path = self.root / f"{key}.json"
         if not path.exists():
             raise TrackerError(f"no ticket {key} in {self.root}")
-        return ticket_from_dict(json.loads(path.read_text()))
+        return ticket_from_dict(self._load(path))
 
     def list(self, project: str | None = None, statuses: set[Status] | None = None) -> list[Ticket]:
         if not self.root.is_dir():
             raise TrackerError(f"tracker directory {self.root} does not exist")
-        tickets = [ticket_from_dict(json.loads(p.read_text())) for p in sorted(self.root.glob("*.json"))]
+        tickets = [ticket_from_dict(self._load(p)) for p in sorted(self.root.glob("*.json"))]
         return [
             t for t in tickets
             if (project is None or t.project == project) and (statuses is None or t.status in statuses)
