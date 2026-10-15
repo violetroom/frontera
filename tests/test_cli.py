@@ -62,5 +62,38 @@ def test_review_dry_run(config_file, tmp_path, capsys):
     assert "claude-pro" in capsys.readouterr().out
 
 
+def test_status_shows_ticket(config_file, tmp_path, capsys):
+    write_ticket(tmp_path / "tickets", current_tier=2, attempts=2, promotions=1,
+                 last_endpoint="qwen-27b", pr_number=7, review_verdict="approve")
+    assert run(config_file, "status", "SHI-1") == 0
+    out = capsys.readouterr().out
+    lines = out.splitlines()
+    assert lines == [
+        "key: SHI-1",
+        "summary: Fix a thing",
+        "status: Ready",
+        "lane: code/2",
+        "tier: 1",
+        "attempts: 2",
+        "promotions: 1",
+        "last_endpoint: qwen-27b",
+        "pr: 7",
+        "review: approve",
+    ]
+    write_ticket(tmp_path / "tickets", key="SHI-2")
+    assert run(config_file, "status", "SHI-2") == 0
+    out2 = capsys.readouterr().out
+    assert "last_endpoint: none" in out2.splitlines()
+    assert "pr: none" in out2.splitlines()
+    assert "review: none" in out2.splitlines()
+
+
+def test_status_unknown_key(config_file, tmp_path, capsys):
+    write_ticket(tmp_path / "tickets")
+    assert run(config_file, "status", "SHI-9") == 1
+    err = capsys.readouterr().err
+    assert "SHI-9" in err
+
+
 def test_missing_config(tmp_path, capsys):
     assert main(["--config", str(tmp_path / "nope.yaml"), "next"]) == 1
