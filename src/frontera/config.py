@@ -76,6 +76,8 @@ class Project:
     check_command: str | None = None
     research_dir: str = "docs/research"
     github_repo: str | None = None  # owner/name, for the github tracker
+    # Never changed by an agent, whatever a ticket's Allowed Paths say (e.g. the workflows that run agents).
+    protected_paths: tuple[str, ...] = (".github/**",)
 
 
 @dataclass(frozen=True)
@@ -130,6 +132,7 @@ def parse_config(raw: dict[str, Any]) -> Config:
             check_command=p.get("check_command"),
             research_dir=p.get("research_dir", "docs/research"),
             github_repo=p.get("github_repo"),
+            protected_paths=tuple(p.get("protected_paths", (".github/**",))),
         )
 
     endpoints = {}

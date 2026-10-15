@@ -98,19 +98,21 @@ def run_check(repo: Path, command: str, timeout_s: int = 1200) -> tuple[bool, st
 class Verification:
     files: list[str]
     outside: list[str] = field(default_factory=list)
+    protected: list[str] = field(default_factory=list)
     findings: list[Finding] = field(default_factory=list)
     check_ok: bool | None = None  # None: no check configured
     check_output: str = ""
 
     @property
     def scope_ok(self) -> bool:
-        return not self.outside and not self.findings
+        return not self.outside and not self.protected and not self.findings
 
 
 def verify(repo: Path, allowed: list[str], private_terms: tuple[str, ...], check_command: str | None,
-           timeout_s: int = 1200) -> Verification:
+           timeout_s: int = 1200, protected: tuple[str, ...] = ()) -> Verification:
     files = changed_files(repo)
-    v = Verification(files=files, outside=[f for f in files if not path_allowed(f, allowed)])
+    v = Verification(files=files, outside=[f for f in files if not path_allowed(f, allowed)],
+                     protected=[f for f in files if protected and path_allowed(f, list(protected))])
     for f, text in added_text(repo, files).items():
         v.findings += scan_text(text, f, private_terms)
     if check_command:

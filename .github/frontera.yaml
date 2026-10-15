@@ -1,0 +1,67 @@
+# Frontera routing for Frontera itself. Public: names env vars and secrets, never their values.
+# The dispatcher that runs these jobs is installed from main, never from the PR under test.
+
+tracker:
+  kind: github
+  project: FRO
+
+state_dir: .frontera/state
+
+privacy:
+  private_terms_env: FRONTERA_PRIVATE_TERMS
+
+projects:
+  FRO:
+    repo: .
+    github_repo: violetroom/frontera
+    base_branch: main
+    # A throwaway venv: installing agent-modified frontera into the dispatcher's own Python would let a PR
+    # change the prompts and code of the job that is judging it.
+    check_command: "python -m venv /tmp/fro-check && /tmp/fro-check/bin/pip install -q -e . pytest && /tmp/fro-check/bin/python -m pytest -q"
+    research_dir: docs/research
+    protected_paths: [".github/**"]
+
+tiers: [1, 2, 3]
+
+endpoints:
+  qwen-n0:
+    harness: opencode
+    model: tellico-0/qwen3.8-27b-gsq-iq3s
+    launch: auto
+    max_concurrent: 1
+    provider: &tellico
+      base_url_env: TELLICO_GATEWAY_URL
+      base_url_suffix: /node0
+      api_key_env: TELLICO_API_KEY
+      context: 131072
+      output: 32768
+      model_config:
+        reasoning: true
+        interleaved: { field: reasoning_content }
+        options: { temperature: 0.6, top_p: 0.95 }
+  qwen-n1:
+    harness: opencode
+    model: tellico-1/qwen3.8-27b-gsq-iq3s
+    launch: auto
+    max_concurrent: 1
+    provider:
+      <<: *tellico
+      base_url_suffix: /node1
+  claude-pro:
+    harness: claude-code
+    launch: on_command
+    max_concurrent: 1
+    max_runs_per_command: 3
+    provider: { token_env: CLAUDE_CODE_OAUTH_TOKEN }
+  codex-plus:
+    harness: codex
+    launch: disabled
+
+lanes:
+  code/1:     { endpoints: [qwen-n0, qwen-n1], wall_clock: 45m, attempts: 2, promote_to: code/3 }
+  code/2:     { endpoints: [qwen-n0, qwen-n1], wall_clock: 90m, attempts: 2, promote_to: code/3 }
+  code/3:     { endpoints: [claude-pro], wall_clock: 60m, attempts: 1 }
+  research/1: { endpoints: [qwen-n0, qwen-n1], wall_clock: 30m, attempts: 1, promote_to: research/3 }
+  research/3: { endpoints: [claude-pro], wall_clock: 45m, attempts: 1 }
+  review:     { endpoints: [claude-pro], fallback: [qwen-n0, qwen-n1], wall_clock: 30m }
+  test:       { endpoints: [qwen-n0, qwen-n1], wall_clock: 30m }

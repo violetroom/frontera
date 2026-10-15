@@ -162,13 +162,16 @@ def attempt(ctx: Ctx, t: Ticket, ep: Endpoint, fix_branch: str | None = None) ->
 
     allowed = default_allowed_paths(t, ctx.project)
     check = ctx.project.check_command if t.kind.value == "code" else None
-    v = verify(ctx.repo, allowed, ctx.cfg.private_terms, check)
+    v = verify(ctx.repo, allowed, ctx.cfg.private_terms, check, protected=ctx.project.protected_paths)
     outcome = (result or {}).get("outcome")
 
     if outcome in ("needs_decision", "policy_blocked"):
         qs = (result or {}).get("questions") or []
         return Attempt("decision", f"Worker stopped: `{outcome}` ({(result or {}).get('reason_code')}). "
                        f"{(result or {}).get('summary', '')}\n\nQuestions:\n{_fmt_list(qs)}")
+    if v.protected:
+        return Attempt("decision", "The worker changed protected files, which agents may never change, so nothing "
+                       "was pushed:\n" + _fmt_list(f"`{f}`" for f in v.protected))
     if v.outside:
         return Attempt("decision", "The worker changed files outside Allowed Paths, so nothing was pushed:\n"
                        + _fmt_list(f"`{f}`" for f in v.outside))

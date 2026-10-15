@@ -349,3 +349,10 @@ def test_pr_commands_ignore_forks_and_non_agent_branches(world):
     world.gh.pulls[5] = {"head": {"ref": "feature/x", "repo": {"full_name": REPO}}}
     assert go(world, pr_comment_event(5, "/frontera review")) == "ignored: not an agent PR"
     assert world.launches == []
+
+
+def test_protected_paths_refused_even_when_allowed(world):
+    world.gh.add_issue(1, body=body(allowed=("**",)), labels=["state:ready"])
+    world.script.append({"files": {".github/workflows/x.yml": "on: push\n"}})
+    assert "decision" in go(world, label_event(1))
+    assert world.forge.pushed == [] and any("protected files" in c for c in world.gh.bot_comments(1))

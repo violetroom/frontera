@@ -1,0 +1,54 @@
+name: Agent task
+description: Work for a Frontera agent (code or research). Add the state:ready label to start it.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This repository is public: everything here is world-readable and is sent to model providers.
+        No hostnames, account names, private paths, or credentials.
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind
+      options: [code, research]
+    validations:
+      required: true
+  - type: dropdown
+    id: tier
+    attributes:
+      label: Tier
+      description: 1 mechanical, 2 moderate, 3 hard (runs on Claude only when you comment /frontera run)
+      options: ["1", "2", "3"]
+    validations:
+      required: true
+  - type: dropdown
+    id: risk
+    attributes:
+      label: Risk
+      options: [low, medium, high]
+      default: 0
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: The observable behaviour to create or fix, and why.
+  - type: textarea
+    id: criteria
+    attributes:
+      label: Acceptance criteria
+      description: One per line. Each should be checkable by a test or by reading the result.
+      placeholder: "- Malformed IDs return HTTP 400"
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context files
+      description: Repo paths the agent should read, one per line. Keep it short; the agent reads only these.
+      placeholder: "- AGENTS.md"
+  - type: textarea
+    id: allowed
+    attributes:
+      label: Allowed paths
+      description: Globs the change may touch, one per line. Required for code. Research writes docs/research/<ticket>.md.
+      placeholder: "- tests/**"
