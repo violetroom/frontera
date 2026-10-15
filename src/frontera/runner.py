@@ -18,13 +18,13 @@ from typing import Callable, Protocol
 
 from .config import Config, Endpoint, Project
 from .contextpack import PACK_DIR, build_pack, render_ticket, write_pack
-from .harness import LaunchResult, LaunchSpec, launch
+from .harness import LaunchResult, LaunchSpec, launch, remote_control_enabled
 from .models import Status, Ticket, execution_id
 from .preflight import default_allowed_paths, preflight
 from .routing import WaitReason, promotion_target, route, route_lane, route_review
 from .state import EndpointState
 from .tracker.github import GitHubTracker, Meta
-from .usage import write_launch_record
+from .usage import write_launch_record as _write_launch_record
 from .verify import Verification, changed_files, git, paths_overlap, run_check, verify
 
 BOT_NAME = "github-actions[bot]"
@@ -40,6 +40,14 @@ class Forge(Protocol):
     def review_pr(self, number: int, body: str) -> None: ...
     def comment_pr(self, number: int, body: str) -> None: ...
     def merge_pr(self, number: int, branch: str) -> tuple[bool, str]: ...
+
+
+def write_launch_record(run_dir: Path, *, ep: Endpoint, **kw) -> dict:
+    """Write launch.json, adding whether the worker had remote control."""
+    record = _write_launch_record(run_dir, endpoint=ep.name, harness=ep.harness, **kw)
+    record["remote_control"] = remote_control_enabled(ep)
+    (run_dir / "launch.json").write_text(json.dumps(record, indent=2))
+    return record
 
 
 @dataclass
@@ -199,11 +207,11 @@ def attempt(ctx: Ctx, t: Ticket, ep: Endpoint, fix_branch: str | None = None) ->
     write_pack(pack, run_dir)
 
     started = time.monotonic()
-    res = ctx.launcher(LaunchSpec(ep, t.kind.value, pack.prompt, ctx.repo, lane.wall_clock_s, run_dir / "agent.log"))
+    res = ctx.launcher(LaunchSpec(ep, t.kind.value, pack.prompt, ctx.repo, lane.wall_clock_s, run_dir / "agent.log", exec_id))
     result = _read_result(ctx.repo / PACK_DIR / "result.json", exec_id)
     if result is not None:
         (run_dir / "result.json").write_text(json.dumps(result, indent=2))
-    write_launch_record(run_dir, execution_id=exec_id, endpoint=ep.name, harness=ep.harness,
+    write_launch_record(run_dir, execution_id=exec_id, ep=ep,
                         kind=t.kind.value, lane=lane.name, wall_s=time.monotonic() - started,
                         outcome=_launch_outcome(res, result), res=res)
 
@@ -424,11 +432,11 @@ def _launch_gate(ctx: Ctx, t: Ticket, ep: Endpoint, kind: str, prompt_name: str,
     shutil.copy(pack_dir / "ticket.md", run_dir / "ticket.md")
     lane = ctx.cfg.lanes[lane_name]
     started = time.monotonic()
-    res = ctx.launcher(LaunchSpec(ep, kind, prompt, ctx.repo, lane.wall_clock_s or 1800, run_dir / "agent.log"))
+    res = ctx.launcher(LaunchSpec(ep, kind, prompt, ctx.repo, lane.wall_clock_s or 1800, run_dir / "agent.log", exec_id))
     result = _read_result(pack_dir / "result.json", exec_id)
     if result is not None:
         (run_dir / "result.json").write_text(json.dumps(result, indent=2))
-    write_launch_record(run_dir, execution_id=exec_id, endpoint=ep.name, harness=ep.harness,
+    write_launch_record(run_dir, execution_id=exec_id, ep=ep,
                         kind=kind, lane=lane_name, wall_s=time.monotonic() - started,
                         outcome=_launch_outcome(res, result), res=res)
     return result, res

@@ -212,6 +212,8 @@ def test_coding_launch_writes_full_launch_record(world):
     assert data["kind"] == "code" and data["lane"] == "code/1"
     assert data["outcome"] == "success" and data["usage"] == {}
     assert isinstance(data["wall_s"], (int, float)) and data["wall_s"] >= 0
+    assert data["remote_control"] is False
+    assert world.launches[0].label == exec_id
 
 
 def test_failures_promote_to_awaiting_command(world):
@@ -400,6 +402,9 @@ def test_review_and_test_launches_write_launch_records(world):
     assert review["outcome"] == "approve"
     test = json.loads((world.launches[2].log_path.parent / "launch.json").read_text())
     assert test["kind"] == "test" and test["lane"] == "test"
+    assert review["remote_control"] is False and test["remote_control"] is False
+    assert world.launches[1].label and world.launches[1].label in review["execution_id"]
+    assert world.launches[2].label == test["execution_id"]
     assert test["endpoint"].startswith("qwen") and test["outcome"] == "pass"
 
 

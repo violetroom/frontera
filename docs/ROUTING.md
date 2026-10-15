@@ -154,6 +154,22 @@ lanes:
 
 Lane resolution goes through the list in order. It skips `disabled` endpoints, endpoints not allowed for the project, endpoints cooling after a usage limit, and endpoints at `max_concurrent`. If the first usable endpoint is `on_command` and there is no owner command, the ticket goes to Awaiting Command.
 
+## Tellico setup, remote control and plugin env
+
+An `opencode` endpoint can use the pinned Tellico setup that the workflow checks out. All of these are provider settings in `.github/frontera.yaml`:
+
+```yaml
+provider:
+  setup_dir_env: TELLICO_SETUP_DIR          # env var naming the setup checkout
+  env_passthrough: [TELLICO_LOOP_GUARD, TELLICO_DISK_MIN_FREE]
+```
+
+- **`setup_dir_env`.** When the variable is set and the directory exists, the generated OpenCode config reads `<dir>/config/opencode.json` (JSONC) and takes only: the headless-safe plugins `loop-guard`, `compaction-guard`, `secret-guard`, `disk-guard` (as `<dir>/plugins/<name>`; `tui`, `tui-v2`, `dispatch-balance` are dropped), `tool_output`, `compaction`, and the setup's model block for the endpoint's model (variants, options). Frontera's own limits and `model_config` are applied on top. `baseURL`, `apiKey`, `permission`, `autoupdate` and `share` are always Frontera's; nothing from the setup can loosen them. With the variable unset or the directory missing the config is the minimal one. A malformed setup config fails the launch with the file path.
+- **Remote control.** If `TELLICO_REMOTE_CONTROL=1`, `TELLICO_RELAY_URL` and `TELLICO_RELAY_KEY_FILE` are set (the workflow's `remote_control` input) and the setup dir exists, the `remote-control` plugin is loaded and exactly those three plus `TELLICO_RELAY_MACHINE` reach the worker. The machine name is the workflow default followed by the execution id, so the app shows which session is which. Otherwise neither the plugin nor the variables are passed. Every `launch.json` records `remote_control: true|false`. Publishing a headless session is confirmed; steering it from the app is not yet.
+- **`env_passthrough`.** Extra variables (for plugin tuning) copied into the worker's scrubbed environment only when they are set. Dispatcher credentials (`GH_TOKEN` etc.) are refused.
+
+Enabling `setup_dir_env` edits a protected path, so the owner makes that change after merge.
+
 ## Adding a model
 
 1. **OpenAI-compatible endpoint** (DeepSeek, Qwen Flash, OpenRouter, Gemini's OpenAI-compatible endpoint, another Tellico model): add an `endpoints:` entry using the `opencode` harness and reference its key by environment variable, then put it in a lane. No code.
