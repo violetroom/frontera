@@ -113,6 +113,24 @@ def test_status_unknown_key(config_file, tmp_path, capsys):
     assert "SHI-9" in err
 
 
+def test_status_malformed_ticket_file(config_file, tmp_path, capsys):
+    (tmp_path / "tickets" / "SHI-1.json").write_text('{"key": "SHI-1", "project": ')
+    assert run(config_file, "status", "SHI-1") == 1
+    err = capsys.readouterr().err
+    assert "SHI-1.json" in err
+    assert "Traceback" not in err
+    assert len(err.strip().splitlines()) == 1
+
+
+def test_next_malformed_ticket_file(config_file, tmp_path, capsys):
+    (tmp_path / "tickets" / "SHI-1.json").write_text("not json")
+    assert run(config_file, "next") == 1
+    err = capsys.readouterr().err
+    assert "SHI-1.json" in err
+    assert "Traceback" not in err
+    assert len(err.strip().splitlines()) == 1
+
+
 def test_missing_config(tmp_path, capsys):
     assert main(["--config", str(tmp_path / "nope.yaml"), "next"]) == 1
 
