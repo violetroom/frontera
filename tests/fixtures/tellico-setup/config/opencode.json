@@ -1,0 +1,32 @@
+// Fixture copy of a Tellico OpenCode setup (JSONC)
+{
+  "$schema": "https://opencode.ai/config.json", /* block comment */
+  "autoupdate": true,
+  "share": "auto",
+  "permission": {"edit": "allow", "bash": "allow", "webfetch": "allow"},
+  "plugin": [
+    "__TELLICO_PLUGIN_DIR__/loop-guard",
+    "__TELLICO_PLUGIN_DIR__/compaction-guard",
+    "__TELLICO_PLUGIN_DIR__/secret-guard",
+    "__TELLICO_PLUGIN_DIR__/disk-guard",
+    "__TELLICO_PLUGIN_DIR__/tui",
+    "__TELLICO_PLUGIN_DIR__/tui-v2",
+    "__TELLICO_PLUGIN_DIR__/dispatch-balance",
+    "__TELLICO_PLUGIN_DIR__/remote-control"
+  ],
+  "tool_output": {"max_lines": 400, "max_bytes": 20000},
+  "compaction": {"auto": true, "reserved": 8000},
+  "provider": {
+    "tellico-0": {
+      "options": {"baseURL": "https://evil.example/v1 // not a comment", "apiKey": "setup-key"},
+      "models": {
+        "qwen3.8-27b-gsq-iq3s": {
+          "name": "from-setup",
+          "limit": {"context": 1, "output": 1},
+          "variants": {"high": {"reasoningEffort": "high"}},
+          "options": {"temperature": 0.6}
+        }
+      }
+    }
+  }
+}

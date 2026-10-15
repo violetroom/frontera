@@ -35,6 +35,7 @@ class LaunchSpec:
     cwd: Path
     timeout_s: int | None
     log_path: Path
+    label: str | None = None  # shown in the remote-control app, e.g. the execution id
 
 
 @dataclass
@@ -58,6 +59,85 @@ def scrubbed_env(extra: list[str], source: dict[str, str] | None = None) -> dict
     return env
 
 
+SAFE_PLUGINS = ("loop-guard", "compaction-guard", "secret-guard", "disk-guard")
+RELAY_VARS = ("TELLICO_REMOTE_CONTROL", "TELLICO_RELAY_URL", "TELLICO_RELAY_KEY_FILE")
+PLUGIN_DIR_TOKEN = "__TELLICO_PLUGIN_DIR__"
+
+
+def strip_jsonc(text: str) -> str:
+    """Remove // and /* */ comments, leaving string contents (such as URLs) intact."""
+    out: list[str] = []
+    i, n = 0, len(text)
+    while i < n:
+        c = text[i]
+        if c == '"':
+            j = i + 1
+            while j < n and text[j] != '"':
+                j += 2 if text[j] == "\\" else 1
+            out.append(text[i:j + 1])
+            i = j + 1
+        elif text.startswith("//", i):
+            while i < n and text[i] != "\n":
+                i += 1
+        elif text.startswith("/*", i):
+            end = text.find("*/", i + 2)
+            i = n if end < 0 else end + 2
+            out.append(" ")
+        else:
+            out.append(c)
+            i += 1
+    return "".join(out)
+
+
+def setup_dir(ep: Endpoint, source: dict[str, str]) -> Path | None:
+    """The pinned Tellico setup directory named by ``setup_dir_env``, if set and present."""
+    name = ep.provider.get("setup_dir_env")
+    value = source.get(name) if name else None
+    if not value or not Path(value).is_dir():
+        return None
+    return Path(value).resolve()
+
+
+def remote_control_enabled(ep: Endpoint, source: dict[str, str] | None = None) -> bool:
+    source = os.environ if source is None else source
+    return (ep.harness == "opencode" and setup_dir(ep, source) is not None
+            and source.get("TELLICO_REMOTE_CONTROL") == "1"
+            and all(source.get(v) for v in RELAY_VARS[1:]))
+
+
+def _load_setup(root: Path) -> dict:
+    path = root / "config" / "opencode.json"
+    try:
+        data = json.loads(strip_jsonc(path.read_text()))
+    except (OSError, ValueError) as e:
+        raise HarnessError(f"cannot read Tellico setup config {path}: {e}") from e
+    if not isinstance(data, dict):
+        raise HarnessError(f"Tellico setup config {path} must be a JSON object")
+    return data
+
+
+def _setup_plugins(setup: dict, root: Path) -> list[str]:
+    plugins = []
+    for entry in setup.get("plugin") or []:
+        if isinstance(entry, list) and entry:
+            entry = entry[0]
+        if not isinstance(entry, str):
+            continue
+        path = entry.replace(PLUGIN_DIR_TOKEN, str(root / "plugins"))
+        if Path(path).stem in SAFE_PLUGINS:
+            plugins.append(path)
+    return plugins
+
+
+def _setup_model(setup: dict, pid: str, mid: str) -> dict:
+    providers = setup.get("provider") or {}
+    for key in (pid, *providers):
+        block = ((providers.get(key) or {}).get("models") or {}).get(mid)
+        if isinstance(block, dict):
+            return dict(block)
+    return {}
+
+
 def opencode_config(ep: Endpoint, kind: str, source: dict[str, str] | None = None) -> dict:
     """OpenCode config for an OpenAI-compatible endpoint described in ``endpoint.provider``."""
     source = os.environ if source is None else source
@@ -69,11 +149,14 @@ def opencode_config(ep: Endpoint, kind: str, source: dict[str, str] | None = Non
     if not base_env or base_env not in source:
         raise HarnessError(f"{ep.name}: base_url_env {base_env!r} is not set")
     base = source[base_env].rstrip("/") + p.get("base_url_suffix", "")
-    model = {"name": mid, "limit": {"context": p.get("context", 131072), "output": p.get("output", 32768)}}
+    root = setup_dir(ep, source)
+    setup = _load_setup(root) if root else {}
+    model = _setup_model(setup, pid, mid)
+    model.update({"name": mid, "limit": {"context": p.get("context", 131072), "output": p.get("output", 32768)}})
     model.update(p.get("model_config") or {})
     web = "allow" if kind == "research" else "deny"
     edit = "deny" if kind == "review" else "allow"
-    return {
+    cfg = {
         "$schema": "https://opencode.ai/config.json",
         "autoupdate": False,
         "share": "disabled",
@@ -86,6 +169,16 @@ def opencode_config(ep: Endpoint, kind: str, source: dict[str, str] | None = Non
         }},
         "permission": {"edit": edit, "bash": "allow", "webfetch": web, "websearch": web},
     }
+    if root:
+        plugins = _setup_plugins(setup, root)
+        if remote_control_enabled(ep, source):
+            plugins.append(str(root / "plugins" / "remote-control"))
+        if plugins:
+            cfg["plugin"] = plugins
+        for key in ("tool_output", "compaction"):
+            if key in setup:
+                cfg[key] = setup[key]
+    return cfg
 
 
 def build_command(spec: LaunchSpec, source: dict[str, str] | None = None) -> tuple[list[str], dict[str, str]]:
@@ -94,6 +187,17 @@ def build_command(spec: LaunchSpec, source: dict[str, str] | None = None) -> tup
         cfg = opencode_config(ep, spec.kind, source)
         env = scrubbed_env([ep.provider["api_key_env"]], source)
         env["OPENCODE_CONFIG_CONTENT"] = json.dumps(cfg)
+        src = os.environ if source is None else source
+        for name in ep.provider.get("env_passthrough") or []:
+            if name in DISPATCHER_SECRETS:
+                raise HarnessError(f"{name} is a dispatcher credential and cannot be passed to a worker")
+            if name in src:
+                env[name] = src[name]
+        if remote_control_enabled(ep, src):
+            for name in RELAY_VARS:
+                env[name] = src[name]
+            machine = src.get("TELLICO_RELAY_MACHINE", "")
+            env["TELLICO_RELAY_MACHINE"] = " ".join(x for x in (machine, spec.label) if x) or "frontera"
         return ["opencode", "run", "--standalone", "--auto", "--model", ep.model, spec.prompt], env
     if ep.harness == "claude-code":
         tools = {
