@@ -18,7 +18,8 @@ from pathlib import Path
 from .config import Endpoint
 
 BASE_ENV = ("PATH", "HOME", "LANG", "LC_ALL", "TERM", "TMPDIR", "USER", "SHELL", "CI")
-_RATE = re.compile(r"rate.?limit|usage limit|\b429\b|quota exceeded|too many requests", re.I)
+DISPATCHER_SECRETS = ("GH_TOKEN", "GITHUB_TOKEN", "FRONTERA_APP_TOKEN")
+_RATE =re.compile(r"rate.?limit|usage limit|\b429\b|quota exceeded|too many requests", re.I)
 _OUTAGE = re.compile(r"\b50[234]\b|service unavailable|overloaded|ECONNREFUSED|ETIMEDOUT|connection reset", re.I)
 
 
@@ -49,6 +50,8 @@ def scrubbed_env(extra: list[str], source: dict[str, str] | None = None) -> dict
     source = os.environ if source is None else source
     env = {k: source[k] for k in BASE_ENV if k in source}
     for name in extra:
+        if name in DISPATCHER_SECRETS:
+            raise HarnessError(f"{name} is a dispatcher credential and cannot be passed to a worker")
         if name not in source:
             raise HarnessError(f"environment variable {name} is not set")
         env[name] = source[name]

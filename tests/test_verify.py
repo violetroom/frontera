@@ -87,7 +87,8 @@ def test_verify_scope_scan_and_check(repo):
 
 def test_check_command_gets_scrubbed_env(repo, monkeypatch):
     monkeypatch.setenv("GH_TOKEN", "should-not-leak")
-    v = verify(repo, ["**"], (), 'test -z "$GH_TOKEN"')
+    monkeypatch.setenv("FRONTERA_APP_TOKEN", "should-not-leak")
+    v = verify(repo, ["**"], (), 'test -z "$GH_TOKEN" && test -z "$FRONTERA_APP_TOKEN"')
     assert v.check_ok is True
 
 

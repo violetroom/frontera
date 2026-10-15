@@ -15,7 +15,7 @@ from pathlib import Path
 
 from .commands import CommandError, is_owner, parse_command
 from .config import Config
-from .gh import Gh
+from .gh import Gh, GhCli
 from .models import Status
 from .runner import Ctx, drain, fix_ticket, promote_ticket, run_chain, run_ticket
 from .tracker import make_tracker
@@ -75,6 +75,18 @@ class GitHubForge:
         except Exception:
             pass
         return True, "merged"
+
+
+def make_forge(tracker: GitHubTracker, workdir: Path, env: dict[str, str]) -> GitHubForge:
+    """Push, PRs, reviews and merges use the App token when FRONTERA_APP_TOKEN is set, else GH_TOKEN.
+
+    The owner-permission check and state comments keep using the tracker's own client.
+    """
+    app_token = env.get("FRONTERA_APP_TOKEN")
+    if app_token:
+        return GitHubForge(GhCli(app_token), tracker.repo, workdir, app_token)
+    token = env.get("GH_TOKEN") or env.get("GITHUB_TOKEN") or ""
+    return GitHubForge(tracker.gh, tracker.repo, workdir, token)
 
 
 def ticket_number_for_pr(tracker: GitHubTracker, pr_number: int) -> int | None:
@@ -185,7 +197,7 @@ def main_action(cfg: Config, event_name: str, event_path: str) -> int:
     run_url = ""
     if os.environ.get("GITHUB_RUN_ID"):
         run_url = f"{os.environ.get('GITHUB_SERVER_URL', 'https://github.com')}/{os.environ.get('GITHUB_REPOSITORY')}/actions/runs/{os.environ['GITHUB_RUN_ID']}"
-    token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN") or ""
-    ctx = Ctx(cfg, project, tracker, GitHubForge(tracker.gh, tracker.repo, project.repo, token), run_url)
+    forge = make_forge(tracker, project.repo, os.environ)
+    ctx = Ctx(cfg, project, tracker, forge, run_url)
     print(handle(cfg, event_name, event, ctx))
     return 0
