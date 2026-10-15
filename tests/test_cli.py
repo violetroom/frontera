@@ -153,6 +153,12 @@ def test_ticket_new_scan_blocks(config_file, capsys):
     assert "private_term" in capsys.readouterr().err
 
 
+def test_ticket_new_scan_blocks_title(config_file, capsys):
+    assert run(config_file, "ticket", "new", "--dry-run",
+               *new_ticket_args(**{"--title": "deploy to secret-host.example"})) == EXIT_BLOCKED
+    assert "private_term" in capsys.readouterr().err
+
+
 def test_ticket_new_unknown_project(config_file, capsys):
     assert run(config_file, "ticket", "new", "--dry-run", "--project", "NOPE", *new_ticket_args()) == EXIT_BLOCKED
     assert "NOPE" in capsys.readouterr().err

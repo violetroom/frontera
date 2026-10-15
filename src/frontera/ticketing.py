@@ -76,10 +76,14 @@ def validate_draft(draft: TicketDraft, cfg: Config, project: Project) -> list[st
             if _allowed_matches_protected(path, protected):
                 problems.append(f"allowed path {path} matches protected path {protected}")
                 break
+    root = project.repo.resolve()
     for name in draft.context:
-        if not (project.repo / name).exists():
+        p = (root / name).resolve()
+        if not p.exists():
             problems.append(f"context file {name} does not exist in the local checkout")
-    for finding in scan_text(render(draft), "ticket", cfg.private_terms):
+        elif not p.is_relative_to(root):
+            problems.append(f"context file {name} is not inside the local checkout")
+    for finding in scan_text(draft.title + "\n" + render(draft), "ticket", cfg.private_terms):
         problems.append(f"privacy/secret scan: {finding}")
     return problems
 

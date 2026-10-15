@@ -58,6 +58,19 @@ def test_context_file_must_exist(cfg):
     assert any("missing.md" in p for p in problems)
 
 
+def test_context_file_must_be_in_checkout(cfg, tmp_path):
+    outside = tmp_path / "outside.md"
+    outside.write_text("outside the checkout")
+    problems = validate_draft(draft(context=[str(outside)]), cfg, cfg.projects["SHI"])
+    assert any("outside.md" in p and "checkout" in p for p in problems)
+
+
+def test_context_dotdot_existing_outside_rejected(cfg, tmp_path):
+    (tmp_path / "outside.md").write_text("outside the checkout")
+    problems = validate_draft(draft(context=["../outside.md"]), cfg, cfg.projects["SHI"])
+    assert any("outside.md" in p and "checkout" in p for p in problems)
+
+
 def test_scan_blocks_private_terms(cfg):
     problems = validate_draft(draft(description="deploy to secret-host.example"), cfg, cfg.projects["SHI"])
     assert any("private_term" in p for p in problems)
@@ -65,6 +78,16 @@ def test_scan_blocks_private_terms(cfg):
 
 def test_scan_blocks_secrets(cfg):
     problems = validate_draft(draft(description="token ghp_" + "a" * 36 + " here"), cfg, cfg.projects["SHI"])
+    assert any("github_token" in p for p in problems)
+
+
+def test_scan_blocks_private_terms_in_title(cfg):
+    problems = validate_draft(draft(title="deploy to secret-host.example"), cfg, cfg.projects["SHI"])
+    assert any("private_term" in p for p in problems)
+
+
+def test_scan_blocks_secrets_in_title(cfg):
+    problems = validate_draft(draft(title="token ghp_" + "a" * 36), cfg, cfg.projects["SHI"])
     assert any("github_token" in p for p in problems)
 
 

@@ -23,7 +23,7 @@ frontera ticket new \
   --title "…" --kind code --tier 2 --risk low \
   --description "…" \
   --criterion "…" --criterion "…" \
-  --context AGENTS.md --context docs/Routing.md \
+  --context AGENTS.md --context docs/ROUTING.md \
   --allowed "src/**" \
   --dry-run
 ```
