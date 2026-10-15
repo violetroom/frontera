@@ -154,6 +154,18 @@ def test_t1_success_opens_draft_pr(world):
     assert meta.pr_number == 101 and meta.branch == pr["head"] and pr["head"] == f"agent/{meta.execution_id}"
 
 
+def test_coding_launch_writes_full_launch_record(world):
+    world.gh.add_issue(1, body=body(), labels=["state:ready"])
+    world.script.append({"files": {"src/app.py": "x = 2\n"}})
+    assert "pr" in go(world, label_event(1))
+    exec_id = world.ctx.tracker.meta(1).execution_id
+    data = json.loads((world.work / ".frontera" / "runs" / exec_id / "launch.json").read_text())
+    assert data["endpoint"] == "qwen-27b" and data["harness"] == "opencode"
+    assert data["kind"] == "code" and data["lane"] == "code/1"
+    assert data["outcome"] == "success" and data["usage"] == {}
+    assert isinstance(data["wall_s"], (int, float)) and data["wall_s"] >= 0
+
+
 def test_failures_promote_to_awaiting_command(world):
     world.gh.add_issue(1, body=body(), labels=["state:ready"])
     world.script += [{"outcome": "failed"}, {"files": {"src/app.py": "x = 3\n"}, "result": {}, "outcome": "failed"}]
@@ -328,6 +340,19 @@ def test_review_test_approve_all_pass_merges(world):
     assert world.forge.merged == [101]
     assert not [l for l in world.gh.labels(1) if l.startswith("state:")]
     assert world.gh.issues[1]["state"] == "closed" and world.gh.issues[1]["state_reason"] == "completed"
+
+
+def test_review_and_test_launches_write_launch_records(world):
+    _open_pr(world)
+    world.script += [{"result": {"verdict": "approve"}}, {"result": {"verdict": "pass"}}]
+    assert go(world, comment_event(1, "/frontera review test approve")) == "merged"
+    review = json.loads((world.launches[1].log_path.parent / "launch.json").read_text())
+    assert review["kind"] == "review" and review["lane"] == "review"
+    assert review["endpoint"] == "claude-pro" and review["harness"] == "claude-code"
+    assert review["outcome"] == "approve"
+    test = json.loads((world.launches[2].log_path.parent / "launch.json").read_text())
+    assert test["kind"] == "test" and test["lane"] == "test"
+    assert test["endpoint"].startswith("qwen") and test["outcome"] == "pass"
 
 
 def test_failed_review_sends_back_fixes_same_pr_then_merges(world):

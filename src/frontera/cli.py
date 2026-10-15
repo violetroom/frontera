@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 from . import ticketing
@@ -217,6 +218,25 @@ def cmd_action(args, cfg) -> int:
     return main_action(cfg, name, path)
 
 
+def cmd_usage(args, cfg) -> int:
+    from .usage import UsageError, aggregate_runs, fetch_runs, format_rows
+
+    if args.dir:
+        dest = Path(args.dir).expanduser()
+    else:
+        if not args.repo:
+            print("error: --repo is required unless --dir is given", file=sys.stderr)
+            return EXIT_BLOCKED
+        dest = Path(tempfile.mkdtemp(prefix="frontera-usage-"))
+        try:
+            fetch_runs(args.repo, args.days, dest)
+        except (UsageError, OSError) as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 1
+    print(format_rows(aggregate_runs(dest)))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="frontera")
     p.add_argument("--config", help="config file (default $FRONTERA_CONFIG or ~/.config/frontera/config.yaml)")
@@ -271,6 +291,12 @@ def build_parser() -> argparse.ArgumentParser:
     a.add_argument("--event-name")
     a.add_argument("--event-path")
     a.set_defaults(func=cmd_action)
+
+    u = sub.add_parser("usage", help="per-endpoint usage from run records")
+    u.add_argument("--repo", help="owner/name whose workflow artifacts to download")
+    u.add_argument("--days", type=int, default=14, help="fetch workflow runs from the last N days")
+    u.add_argument("--dir", help="aggregate this directory of run records instead of fetching")
+    u.set_defaults(func=cmd_usage)
     return p
 
 
