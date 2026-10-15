@@ -2,7 +2,7 @@ import subprocess
 
 import pytest
 
-from frontera.verify import added_text, changed_files, path_allowed, verify
+from frontera.verify import added_text, changed_files, conflict_files, has_conflict_markers, path_allowed, verify
 
 
 @pytest.mark.parametrize("path,patterns,ok", [
@@ -56,3 +56,47 @@ def test_check_command_gets_scrubbed_env(repo, monkeypatch):
     monkeypatch.setenv("GH_TOKEN", "should-not-leak")
     v = verify(repo, ["**"], (), 'test -z "$GH_TOKEN"')
     assert v.check_ok is True
+
+
+def test_has_conflict_markers():
+    assert has_conflict_markers("<<<<<<< HEAD\nx = 1\n=======\nx = 2\n>>>>>>> main\n")
+    assert has_conflict_markers("<<<<<<< HEAD\nx = 1\n")
+    assert has_conflict_markers(">>>>>>> origin/main\n")
+    assert not has_conflict_markers("x = 1\n")
+    assert not has_conflict_markers("a ====== b\n")   # not at line start
+    assert not has_conflict_markers("======\n")       # 6 is not a marker; 7 is
+    assert not has_conflict_markers("   =======\n")   # indented is not a marker
+    assert not has_conflict_markers("Title\n=======\n")  # RST/setext underline, not a conflict
+
+
+def test_conflict_files_flags_only_marked_files(repo):
+    (repo / "clean.py").write_text("x = 1\n")
+    (repo / "conflicted.py").write_text("<<<<<<< HEAD\nx = 1\n=======\nx = 2\n>>>>>>> main\n")
+    assert conflict_files(repo, ["clean.py", "conflicted.py"]) == ["conflicted.py"]
+
+
+def test_verify_reports_conflict_files(repo):
+    (repo / "conflicted.py").write_text("<<<<<<< HEAD\nx = 1\n=======\nx = 2\n>>>>>>> main\n")
+    v = verify(repo, ["**"], (), None)
+    assert v.conflict_files == ["conflicted.py"]
+
+
+def test_changed_files_scoped_to_worker_during_conflicted_merge(repo):
+    (repo / "a.txt").write_text("base\n")
+    _commit_all(repo)
+    subprocess.run(["git", "-C", str(repo), "checkout", "-qb", "side"], check=True, capture_output=True)
+    (repo / "a.txt").write_text("side\n")
+    (repo / "b.txt").write_text("from side\n")
+    _commit_all(repo)
+    subprocess.run(["git", "-C", str(repo), "checkout", "-q", "-"], check=True, capture_output=True)
+    (repo / "a.txt").write_text("base2\n")
+    _commit_all(repo)
+    subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@e",
+                    "merge", "--no-edit", "-m", "m", "side"],
+                   check=False, capture_output=True)  # a.txt conflicts; b.txt is staged by the merge
+    assert changed_files(repo) == ["a.txt", "b.txt"]
+    assert changed_files(repo, conflicts=["a.txt"]) == ["a.txt"]
+    # The worker resolves the conflict and adds a file; the base branch's file stays out of scope.
+    (repo / "a.txt").write_text("resolved\n")
+    (repo / "d.txt").write_text("worker\n")
+    assert changed_files(repo, conflicts=["a.txt"]) == ["a.txt", "d.txt"]

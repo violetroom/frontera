@@ -26,6 +26,7 @@ proceed without guessing, stop with `needs_decision` and say what is missing.
 
 ${kind_instructions}
 
+${conflict_note}
 Project check command: `${check_command}`
 
 ## Stop instead of guessing

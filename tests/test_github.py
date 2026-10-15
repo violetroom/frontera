@@ -116,7 +116,8 @@ def world(tmp_path):
 
     tracker = GitHubTracker(gh, REPO, "SHI")
     ctx = Ctx(cfg, cfg.projects["SHI"], tracker, forge, "https://run", launcher)
-    return type("W", (), dict(cfg=cfg, gh=gh, forge=forge, script=script, launches=launches, ctx=ctx, work=work))
+    return type("W", (), dict(cfg=cfg, gh=gh, forge=forge, script=script, launches=launches, ctx=ctx,
+                              work=work, origin=origin))
 
 
 def label_event(number, actor="owner"):
@@ -226,6 +227,41 @@ def _open_pr(world, number=1, tier=1):
     return world.forge.prs[-1]["head"]
 
 
+def _git_out(cwd, *args):
+    return subprocess.run(["git", "-C", str(cwd), *args], check=True, capture_output=True,
+                          text=True).stdout
+
+
+def _advance_main(world, files):
+    """Commit ``files`` to main on the bare origin (via a side clone); return the new main SHA."""
+    url = _git_out(world.work, "remote", "get-url", "origin").strip()
+    ahead = world.work.parent / "ahead"
+    subprocess.run(["git", "clone", "-q", "--branch", "main", url, str(ahead)],
+                   check=True, capture_output=True)
+    for rel, content in files.items():
+        p = ahead / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(content)
+    _git(ahead, "add", "-A")
+    _git(ahead, "-c", "user.name=t", "-c", "user.email=t@e", "commit", "-qm", "main advances")
+    sha = _git_out(ahead, "rev-parse", "HEAD").strip()
+    _git(ahead, "push", "-q", "origin", "main")
+    return sha
+
+
+def _origin_contains(world, ancestor, ref):
+    """True when ``ancestor`` is an ancestor of (or equal to) ``ref`` on the bare origin."""
+    r = subprocess.run(["git", "-C", str(world.origin), "merge-base", "--is-ancestor",
+                        ancestor, ref], capture_output=True)
+    return r.returncode == 0
+
+
+def _origin_file(world, ref, rel):
+    r = subprocess.run(["git", "-C", str(world.origin), "show", f"{ref}:{rel}"],
+                       capture_output=True, text=True)
+    return r.stdout if r.returncode == 0 else None
+
+
 def test_review_test_approve_all_pass_merges(world):
     _open_pr(world)
     world.script += [{"result": {"verdict": "approve"}}, {"result": {"verdict": "pass"}}]
@@ -252,6 +288,70 @@ def test_failed_review_sends_back_fixes_same_pr_then_merges(world):
     assert world.forge.pushed.count(head) == 2 and len(world.forge.prs) == 1  # fix pushed to the same PR
     assert world.ctx.tracker.meta(1).gate_failures == 1
     assert any("Fix pushed" in b for _, b in world.forge.pr_comments)
+
+
+def test_fix_merges_behind_branch_clean(world):
+    head = _open_pr(world)
+    main_sha = _advance_main(world, {"src/other.py": "y = 1\n"})  # main moves ahead, no overlap
+    world.script.append({"files": {"src/app.py": "x = 3\n"}})
+    assert go(world, comment_event(1, "/frontera fix")) == "pr"
+    # The fix started from the branch merged with origin/main; the push is a fast-forward.
+    assert _origin_contains(world, main_sha, head)
+    assert _origin_file(world, head, "src/other.py") == "y = 1\n"
+    assert _origin_file(world, head, "src/app.py") == "x = 3\n"
+
+
+def test_fix_resolves_conflict(world):
+    head = _open_pr(world)
+    _advance_main(world, {"src/app.py": "x = 100\n"})  # overlaps the PR branch's x = 2 -> conflict
+    world.script.append({"files": {"src/app.py": "x = 42\n"}})  # the worker resolves it
+    assert go(world, comment_event(1, "/frontera fix")) == "pr"
+    assert _origin_file(world, head, "src/app.py") == "x = 42\n"
+    # The ticket names the conflicted file; the worker prompt says resolving it is required.
+    fix = world.launches[-1]
+    run_dir = fix.log_path.parent
+    ticket_md = (run_dir / "ticket.md").read_text()
+    prompt_md = (run_dir / "prompt.md").read_text()
+    assert "Merge conflicts to resolve" in ticket_md and "src/app.py" in ticket_md
+    assert "conflict" in prompt_md and "required" in prompt_md
+
+
+def test_fix_leftover_markers_rejected(world):
+    head = _open_pr(world)
+    _advance_main(world, {"src/app.py": "x = 100\n"})  # overlaps the PR branch's x = 2 -> conflict
+    world.script.append({"outcome": "success"})  # the worker leaves the markers in place
+    assert "failed" in go(world, comment_event(1, "/frontera fix"))
+    # Nothing is pushed: the PR branch still has its original content.
+    assert _origin_file(world, head, "src/app.py") == "x = 2\n"
+
+
+def test_fix_conflict_with_main_change_outside_allowed_paths(world):
+    head = _open_pr(world)
+    _advance_main(world, {"src/app.py": "x = 100\n", "notes.md": "main's note\n"})
+    world.script.append({"files": {"src/app.py": "x = 42\n"}})  # the worker resolves the conflict
+    assert go(world, comment_event(1, "/frontera fix")) == "pr"
+    # notes.md is outside Allowed Paths but came in through the merge, not from the worker,
+    # so it is not scope-checked; it still lands on the PR branch.
+    assert _origin_file(world, head, "src/app.py") == "x = 42\n"
+    assert _origin_file(world, head, "notes.md") == "main's note\n"
+    assert world.forge.pushed.count(head) == 2
+
+
+def test_fix_merge_failure_needs_decision(world):
+    head = _open_pr(world)
+    # Force the PR branch to unrelated history, so the base merge cannot run.
+    url = _git_out(world.work, "remote", "get-url", "origin").strip()
+    stray = world.work.parent / "stray"
+    subprocess.run(["git", "init", "-q", "-b", head, str(stray)], check=True, capture_output=True)
+    (stray / "src").mkdir()
+    (stray / "src" / "app.py").write_text("x = 2\n")
+    _git(stray, "add", "-A")
+    _git(stray, "-c", "user.name=t", "-c", "user.email=t@e", "commit", "-qm", "unrelated")
+    _git(stray, "push", "-q", "-f", url, head)
+    world.script.append({"files": {"src/app.py": "x = 3\n"}})
+    assert "decision" in go(world, comment_event(1, "/frontera fix"))
+    assert any("unrelated histories" in c for c in world.gh.bot_comments(1))
+    assert len(world.forge.pushed) == 1  # the fix was not started, nothing was pushed
 
 
 def test_three_failures_promote_and_close_pr(world):

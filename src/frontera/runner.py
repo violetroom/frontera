@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import subprocess
 from dataclasses import dataclass, field
 from importlib import resources
 from pathlib import Path
@@ -99,6 +100,30 @@ def _checkout_pr(ctx: Ctx, branch: str, local: str | None = None) -> None:
     _reset_worktree(ctx, local, "FETCH_HEAD")
 
 
+def _merge_base(ctx: Ctx, branch: str) -> tuple[list[str], str | None]:
+    """Merge ``origin/<base>`` into the local PR branch before a fix, so the fix starts from
+    the branch up to date with the base branch.
+
+    Returns ``(conflicts, error)``. ``conflicts`` is non-empty when the merge stopped on
+    conflicts; it is left in progress with conflict markers in place for the worker to
+    resolve, and the merge commit is created with the worker's changes. ``error`` is set when
+    the merge failed for another reason, in which case the branch was not updated."""
+    base = f"origin/{ctx.project.base_branch}"
+    git(ctx.repo, "fetch", "-q", "origin", ctx.project.base_branch)
+    proc = subprocess.run(["git", "-C", str(ctx.repo), "-c", f"user.name={BOT_NAME}",
+                           "-c", f"user.email={BOT_EMAIL}", "merge", "--no-edit",
+                           "-m", f"Merge {base} into {branch}", base],
+                          capture_output=True, text=True)
+    unmerged = git(ctx.repo, "ls-files", "-u")
+    if unmerged.strip():
+        # Each line is ``<mode> <object> <stage>\t<filename>``; the path follows the first tab.
+        return sorted({line.split("\t", 1)[1] for line in unmerged.splitlines() if "\t" in line}), None
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout).strip()
+        return [], f"git merge: {detail}" if detail else "git merge failed without output"
+    return [], None
+
+
 def _read_result(path: Path, exec_id: str) -> dict | None:
     try:
         data = json.loads(path.read_text())
@@ -139,11 +164,17 @@ def attempt(ctx: Ctx, t: Ticket, ep: Endpoint, fix_branch: str | None = None) ->
     what = f"Fixing PR #{t.pr_number}" if fix_branch else f"Attempt {t.attempts + 1} of {lane.attempts}"
     _save(ctx, t, f"{what} on `{ep.name}` in lane `{lane.name}`. Execution `{exec_id}`{_run_link(ctx)}.",
           last_endpoint=ep.name, execution_id=exec_id, branch=branch)
+    conflicts: list[str] = []
+    merge_error: str | None = None
     if fix_branch:
         _checkout_pr(ctx, fix_branch, fix_branch)
+        conflicts, merge_error = _merge_base(ctx, fix_branch)
     else:
         _reset_worktree(ctx, branch)
-    pack = build_pack(t, ctx.project, ctx.cfg, ep, exec_id)
+    if merge_error:
+        return Attempt("decision", f"Merging `origin/{ctx.project.base_branch}` into `{branch}` "
+                                   f"failed, so the branch was not updated:\n{merge_error}")
+    pack = build_pack(t, ctx.project, ctx.cfg, ep, exec_id, conflicts=conflicts or None)
     if pack.findings:
         return Attempt("decision", "The context sent to the model failed the privacy/secret scan:\n"
                        + _fmt_list(str(f) for f in pack.findings))
@@ -162,7 +193,8 @@ def attempt(ctx: Ctx, t: Ticket, ep: Endpoint, fix_branch: str | None = None) ->
 
     allowed = default_allowed_paths(t, ctx.project)
     check = ctx.project.check_command if t.kind.value == "code" else None
-    v = verify(ctx.repo, allowed, ctx.cfg.private_terms, check, protected=ctx.project.protected_paths)
+    v = verify(ctx.repo, allowed, ctx.cfg.private_terms, check, protected=ctx.project.protected_paths,
+              conflicts=conflicts)
     outcome = (result or {}).get("outcome")
 
     if outcome in ("needs_decision", "policy_blocked"):
@@ -178,6 +210,10 @@ def attempt(ctx: Ctx, t: Ticket, ep: Endpoint, fix_branch: str | None = None) ->
     if v.findings:
         return Attempt("decision", "The change failed the secret/privacy scan, so nothing was pushed:\n"
                        + _fmt_list(str(f) for f in v.findings))
+
+    if v.conflict_files:
+        return Attempt("retry", "Leftover merge conflict markers (<<<<<<< / ======= / >>>>>>>) in:\n"
+                        + _fmt_list(f"`{f}`" for f in v.conflict_files))
 
     note = _handoff_note(exec_id, ep, res, result, v)
     if outcome == "needs_higher_tier":

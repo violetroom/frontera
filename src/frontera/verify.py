@@ -52,8 +52,13 @@ JUNK = ("**/__pycache__/**", "**/*.pyc", "**/.pytest_cache/**", "**/.mypy_cache/
         "**/node_modules/**", "**/.DS_Store")
 
 
-def changed_files(repo: Path) -> list[str]:
-    """Modified, added, deleted and untracked files, excluding the pack directory and build junk."""
+def changed_files(repo: Path, conflicts: list[str] | None = None) -> list[str]:
+    """Modified, added, deleted and untracked files, excluding the pack directory and build junk.
+
+    When ``conflicts`` is non-empty a merge is in progress and changes are measured against
+    the index (the merge result) instead of HEAD: files the base branch brought in are staged
+    by the merge, not written by the worker, so only the conflicted files, files that differ
+    from the index, and new files count as the worker's."""
     out = git(repo, "status", "--porcelain=v1", "-z", "--untracked-files=all")
     files, entries = [], out.split("\0")
     i = 0
@@ -65,10 +70,33 @@ def changed_files(repo: Path) -> list[str]:
         status, path = e[:2], e[3:]
         if status[0] in "RC":  # rename/copy: next entry is the source path
             i += 1
+        if conflicts and status[1] == " " and path not in conflicts:
+            i += 1
+            continue  # staged by the in-progress merge, not changed by the worker
         if not (path == PACK_DIR or path.startswith(PACK_DIR + "/") or path_allowed(path, list(JUNK))):
             files.append(path)
         i += 1
     return sorted(set(files))
+
+
+# Git conflict markers at line start. A ``=======`` separator on its own is ambiguous with
+# RST/setext underlines, so only the opening and closing markers count.
+_CONFLICT = re.compile(r"^(?:<{7,}|>{7,})", re.MULTILINE)
+
+
+def has_conflict_markers(text: str) -> bool:
+    """True when ``text`` still contains git conflict markers at line start."""
+    return bool(_CONFLICT.search(text))
+
+
+def conflict_files(repo: Path, files: list[str]) -> list[str]:
+    """Changed files whose working-tree content still contains conflict markers."""
+    out = []
+    for f in files:
+        path = repo / f
+        if path.is_file() and has_conflict_markers(path.read_bytes().decode(errors="replace")):
+            out.append(f)
+    return out
 
 
 def added_text(repo: Path, files: list[str]) -> dict[str, str]:
@@ -100,6 +128,7 @@ class Verification:
     outside: list[str] = field(default_factory=list)
     protected: list[str] = field(default_factory=list)
     findings: list[Finding] = field(default_factory=list)
+    conflict_files: list[str] = field(default_factory=list)
     check_ok: bool | None = None  # None: no check configured
     check_output: str = ""
 
@@ -109,10 +138,12 @@ class Verification:
 
 
 def verify(repo: Path, allowed: list[str], private_terms: tuple[str, ...], check_command: str | None,
-           timeout_s: int = 1200, protected: tuple[str, ...] = ()) -> Verification:
-    files = changed_files(repo)
+           timeout_s: int = 1200, protected: tuple[str, ...] = (),
+           conflicts: list[str] | None = None) -> Verification:
+    files = changed_files(repo, conflicts)
     v = Verification(files=files, outside=[f for f in files if not path_allowed(f, allowed)],
-                     protected=[f for f in files if protected and path_allowed(f, list(protected))])
+                     protected=[f for f in files if protected and path_allowed(f, list(protected))],
+                     conflict_files=conflict_files(repo, files))
     for f, text in added_text(repo, files).items():
         v.findings += scan_text(text, f, private_terms)
     if check_command:
