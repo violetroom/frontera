@@ -23,6 +23,13 @@ on:
       claude_version:
         type: string
         default: "2.1.299"
+      tellico_setup_ref:
+        description: >-
+          Commit of Yejashi/tellico-agentic-setup whose OpenCode plugins and settings (loop-guard,
+          compaction-guard, secret-guard, disk-guard, tool_output, compaction) Qwen runs use.
+          Pinned to a reviewed commit; bump deliberately.
+        type: string
+        default: "bf48214871fc3c1c0963dc41ca88bdeb1dc28433"
     secrets:
       TELLICO_GATEWAY_URL:
         required: false
@@ -71,6 +78,18 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           "$HOME/.opencode/bin/opencode" --version
           "$HOME/.local/bin/claude" --version
+
+      - name: Fetch the Tellico OpenCode setup
+        # Outside the workspace, so it never shows up as a change in the managed repo.
+        env:
+          TELLICO_SETUP_REF: ${{ inputs.tellico_setup_ref }}
+        run: |
+          d="$RUNNER_TEMP/tellico-agentic-setup"
+          git init -q "$d"
+          git -C "$d" fetch -q --depth 1 https://github.com/Yejashi/tellico-agentic-setup "$TELLICO_SETUP_REF"
+          git -C "$d" checkout -q FETCH_HEAD
+          test "$(git -C "$d" rev-parse HEAD)" = "$TELLICO_SETUP_REF"
+          echo "TELLICO_SETUP_DIR=$d" >> "$GITHUB_ENV"
 
       - name: Handle event
         env:
