@@ -56,6 +56,22 @@ def cmd_next(args, cfg) -> int:
     return 0
 
 
+def cmd_status(args, cfg) -> int:
+    tracker = make_tracker(cfg)
+    ticket = tracker.get(args.key)
+    print(f"key: {ticket.key}")
+    print(f"summary: {ticket.summary}")
+    print(f"status: {ticket.status}")
+    print(f"lane: {ticket.lane}")
+    print(f"tier: {ticket.tier}")
+    print(f"attempts: {ticket.attempts}")
+    print(f"promotions: {ticket.promotions}")
+    print(f"last_endpoint: {ticket.last_endpoint or 'none'}")
+    print(f"pr: {ticket.pr_number if ticket.pr_number is not None else 'none'}")
+    print(f"review: {ticket.review_verdict or 'none'}")
+    return 0
+
+
 def cmd_run(args, cfg) -> int:
     if not args.dry_run:
         print("real runs arrive in step 3; use --dry-run", file=sys.stderr)
@@ -170,6 +186,10 @@ def build_parser() -> argparse.ArgumentParser:
     n = sub.add_parser("next", help="list Ready and Awaiting Command tickets with their routes")
     n.add_argument("--project")
     n.set_defaults(func=cmd_next)
+
+    s = sub.add_parser("status", help="show one ticket's state")
+    s.add_argument("key")
+    s.set_defaults(func=cmd_status)
 
     r = sub.add_parser("run", help="preflight, route and build the context pack for a ticket")
     r.add_argument("key")
