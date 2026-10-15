@@ -30,6 +30,7 @@ endpoints:
       base_url_env: TELLICO_GATEWAY_URL
       base_url_suffix: /node0
       api_key_env: TELLICO_API_KEY
+      setup_dir_env: TELLICO_SETUP_DIR   # pinned Tellico OpenCode setup: guards, limits, remote control
       context: 131072
       output: 32768
       model_config:
