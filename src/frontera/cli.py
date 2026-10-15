@@ -7,6 +7,7 @@ import os
 import sys
 from pathlib import Path
 
+from . import ticketing
 from .config import ConfigError, load_config
 from .contextpack import build_pack, write_pack
 from .models import Status, execution_id
@@ -124,6 +125,48 @@ def cmd_review(args, cfg) -> int:
     return 0
 
 
+def _resolve_project(cfg, key: str | None):
+    if key is None:
+        if len(cfg.projects) == 1:
+            return next(iter(cfg.projects.values()))
+        print(f"error: --project is required when the config has {len(cfg.projects)} projects", file=sys.stderr)
+        return None
+    project = cfg.projects.get(key)
+    if project is None:
+        print(f"error: unknown project {key}", file=sys.stderr)
+    return project
+
+
+def cmd_ticket_new(args, cfg) -> int:
+    project = _resolve_project(cfg, args.project)
+    if project is None:
+        return EXIT_BLOCKED
+    draft = ticketing.TicketDraft(
+        title=args.title, kind=args.kind, tier=args.tier, risk=args.risk,
+        description=args.description, criteria=list(args.criterion),
+        context=list(args.context), allowed=list(args.allowed),
+    )
+    problems = ticketing.validate_draft(draft, cfg, project)
+    if problems:
+        for p in problems:
+            print(f"error: {p}", file=sys.stderr)
+        return EXIT_BLOCKED
+    body = ticketing.render(draft)
+    if args.dry_run:
+        print(body)
+        return 0
+    if not project.github_repo:
+        print(f"error: project {project.key} has no github_repo configured", file=sys.stderr)
+        return EXIT_BLOCKED
+    try:
+        url = ticketing.create_issue(project.github_repo, draft.title, body)
+    except ticketing.TicketError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    print(url)
+    return 0
+
+
 LABELS = {
     "state:ready": ("0e8a16", "Approved for an agent; adding it starts a run"),
     "state:working": ("fbca04", "An agent run is in progress"),
@@ -208,6 +251,21 @@ def build_parser() -> argparse.ArgumentParser:
     lb.add_argument("--repo", required=True, help="owner/name")
     lb.add_argument("--dry-run", action="store_true")
     lb.set_defaults(func=cmd_labels)
+
+    t = sub.add_parser("ticket", help="create tickets as GitHub issues")
+    t_sub = t.add_subparsers(dest="ticket_cmd", required=True)
+    tn = t_sub.add_parser("new", help="validate a ticket and create it as an unlabeled issue")
+    tn.add_argument("--project", help="project key (default: the only configured project)")
+    tn.add_argument("--title", required=True)
+    tn.add_argument("--kind", required=True, help="code or research")
+    tn.add_argument("--tier", required=True, type=int)
+    tn.add_argument("--risk", default="low", help="low, medium or high")
+    tn.add_argument("--description", default="")
+    tn.add_argument("--criterion", action="append", default=[], help="acceptance criterion (repeatable)")
+    tn.add_argument("--context", action="append", default=[], help="context file in the local checkout (repeatable)")
+    tn.add_argument("--allowed", action="append", default=[], help="allowed path pattern (repeatable)")
+    tn.add_argument("--dry-run", action="store_true", help="print the issue body without creating anything")
+    tn.set_defaults(func=cmd_ticket_new)
 
     a = sub.add_parser("action", help="handle a GitHub Actions event (issues, issue_comment, workflow_dispatch)")
     a.add_argument("--event-name")
