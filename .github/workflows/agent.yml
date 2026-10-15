@@ -45,11 +45,17 @@ on:
         required: false
       FRONTERA_PRIVATE_TERMS:
         required: false
+      FRONTERA_APP_ID:
+        required: false
+      FRONTERA_APP_PRIVATE_KEY:
+        required: false
 
 jobs:
   dispatch:
     runs-on: ubuntu-latest
     timeout-minutes: 300
+    env:
+      HAS_FRONTERA_APP: ${{ secrets.FRONTERA_APP_ID != '' }}
     permissions:
       contents: write
       issues: write
@@ -115,10 +121,21 @@ jobs:
             echo "TELLICO_RELAY_MACHINE=actions ${REPO#*/}"
           } >> "$GITHUB_ENV"
 
+      - name: Mint the Frontera App token
+        # With the App, agent PRs trigger CI and merges behave like a normal account's.
+        # Without its secrets this is skipped and the workflow token is used as before.
+        id: app-token
+        if: env.HAS_FRONTERA_APP == 'true'
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.FRONTERA_APP_ID }}
+          private-key: ${{ secrets.FRONTERA_APP_PRIVATE_KEY }}
+
       - name: Handle event
         env:
           CONFIG: ${{ inputs.config }}
           GH_TOKEN: ${{ github.token }}
+          FRONTERA_APP_TOKEN: ${{ steps.app-token.outputs.token }}
           TELLICO_GATEWAY_URL: ${{ secrets.TELLICO_GATEWAY_URL }}
           TELLICO_API_KEY: ${{ secrets.TELLICO_API_KEY }}
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
