@@ -1,11 +1,29 @@
 import json
 
+import yaml
+
+from frontera import ticketing
 from frontera.cli import EXIT_BLOCKED, main
+from frontera.issueform import parse_list, parse_sections
 from conftest import write_ticket
 
 
 def run(config_file, *args):
     return main(["--config", str(config_file), *args])
+
+
+def new_ticket_args(**over):
+    spec = {
+        "--title": "Fix a thing", "--kind": "code", "--tier": ["2"], "--risk": "low",
+        "--description": "Do the thing.", "--criterion": ["It works"],
+        "--context": ["AGENTS.md"], "--allowed": ["src/**"],
+    }
+    spec.update(over)
+    argv = []
+    for flag, value in spec.items():
+        for v in value if isinstance(value, list) else [value]:
+            argv += [flag, str(v)]
+    return argv
 
 
 def test_config_check(config_file, capsys):
@@ -97,3 +115,74 @@ def test_status_unknown_key(config_file, tmp_path, capsys):
 
 def test_missing_config(tmp_path, capsys):
     assert main(["--config", str(tmp_path / "nope.yaml"), "next"]) == 1
+
+
+def test_ticket_new_dry_run_round_trips(config_file, capsys):
+    assert run(config_file, "ticket", "new", "--dry-run", *new_ticket_args()) == 0
+    s = parse_sections(capsys.readouterr().out)
+    assert s["kind"] == "code" and s["tier"] == "2" and s["risk"] == "low"
+    assert s["description"] == "Do the thing."
+    assert parse_list(s["acceptance criteria"]) == ["It works"]
+    assert parse_list(s["context files"]) == ["AGENTS.md"]
+    assert parse_list(s["allowed paths"]) == ["src/**"]
+
+
+def test_ticket_new_requires_criterion(config_file, capsys):
+    assert run(config_file, "ticket", "new", "--dry-run", *new_ticket_args(**{"--criterion": []})) == EXIT_BLOCKED
+    assert "criterion" in capsys.readouterr().err
+
+
+def test_ticket_new_code_needs_allowed_paths(config_file, capsys):
+    assert run(config_file, "ticket", "new", "--dry-run", *new_ticket_args(**{"--allowed": []})) == EXIT_BLOCKED
+    assert "allowed path" in capsys.readouterr().err
+
+
+def test_ticket_new_rejects_protected_path(config_file, capsys):
+    assert run(config_file, "ticket", "new", "--dry-run", *new_ticket_args(**{"--allowed": [".github/**"]})) == EXIT_BLOCKED
+    assert ".github/**" in capsys.readouterr().err
+
+
+def test_ticket_new_context_must_exist(config_file, capsys):
+    assert run(config_file, "ticket", "new", "--dry-run", *new_ticket_args(**{"--context": ["missing.md"]})) == EXIT_BLOCKED
+    assert "missing.md" in capsys.readouterr().err
+
+
+def test_ticket_new_scan_blocks(config_file, capsys):
+    assert run(config_file, "ticket", "new", "--dry-run",
+               *new_ticket_args(**{"--description": "deploy to secret-host.example"})) == EXIT_BLOCKED
+    assert "private_term" in capsys.readouterr().err
+
+
+def test_ticket_new_unknown_project(config_file, capsys):
+    assert run(config_file, "ticket", "new", "--dry-run", "--project", "NOPE", *new_ticket_args()) == EXIT_BLOCKED
+    assert "NOPE" in capsys.readouterr().err
+
+
+def test_ticket_new_creates_issue(raw_config, tmp_path, capsys, monkeypatch):
+    raw_config["projects"]["SHI"]["github_repo"] = "owner/name"
+    p = tmp_path / "cfg.yaml"
+    p.write_text(yaml.safe_dump(raw_config))
+    calls = []
+    monkeypatch.setattr(ticketing, "create_issue",
+                        lambda repo, title, body: calls.append((repo, title, body))
+                        or "https://github.com/owner/name/issues/12")
+    assert run(p, "ticket", "new", *new_ticket_args()) == 0
+    assert "https://github.com/owner/name/issues/12" in capsys.readouterr().out
+    assert calls and calls[0][0] == "owner/name" and calls[0][1] == "Fix a thing"
+    assert "### Kind" in calls[0][2]
+
+
+def test_ticket_new_validation_creates_nothing(raw_config, tmp_path, monkeypatch):
+    raw_config["projects"]["SHI"]["github_repo"] = "owner/name"
+    p = tmp_path / "cfg.yaml"
+    p.write_text(yaml.safe_dump(raw_config))
+    calls = []
+    monkeypatch.setattr(ticketing, "create_issue",
+                        lambda repo, title, body: calls.append(1) or "https://example.invalid")
+    assert run(p, "ticket", "new", *new_ticket_args(**{"--context": ["missing.md"]})) == EXIT_BLOCKED
+    assert calls == []
+
+
+def test_ticket_new_without_github_repo(config_file, capsys):
+    assert run(config_file, "ticket", "new", *new_ticket_args()) == EXIT_BLOCKED
+    assert "github_repo" in capsys.readouterr().err
